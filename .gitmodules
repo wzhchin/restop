@@ -1,0 +1,3 @@
+[submodule "lib/chin-tools"]
+	path = lib/chin-tools
+	url = git@github.com:aeghn/chin-tools
