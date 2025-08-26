@@ -1,10 +1,8 @@
-use strum::IntoEnumIterator;
-use strum_macros::{Display, EnumIter, EnumString};
 
 use super::settings::{Base, TemperatureUnit, SETTINGS};
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, Default, EnumString, Display, Hash, EnumIter)]
+#[derive(Debug, Clone, Copy, Default, Hash)]
 enum Prefix {
     #[default]
     None,
@@ -18,6 +16,25 @@ enum Prefix {
     Yotta,
     Ronna,
     Quetta,
+}
+
+impl Prefix {
+    pub fn into_iter() -> core::array::IntoIter<Prefix, 11> {
+        [
+            Prefix::None,
+            Prefix::Kilo,
+            Prefix::Mega,
+            Prefix::Giga,
+            Prefix::Tera,
+            Prefix::Peta,
+            Prefix::Exa,
+            Prefix::Zetta,
+            Prefix::Yotta,
+            Prefix::Ronna,
+            Prefix::Quetta,
+        ]
+        .into_iter()
+    }
 }
 
 pub fn format_time(time_in_seconds: f64) -> String {
@@ -69,7 +86,7 @@ fn to_largest_prefix(amount: f64, prefix_base: Base) -> (f64, Prefix) {
         Base::Decimal => 1000.0,
         Base::Binary => 1024.0,
     };
-    for prefix in Prefix::iter() {
+    for prefix in Prefix::into_iter() {
         if x < base {
             return (x, prefix);
         }

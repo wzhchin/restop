@@ -1,8 +1,7 @@
 use anyhow::Result;
-use strum_macros::{Display, EnumString, FromRepr};
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, Default, EnumString, Display, Hash, FromRepr)]
+#[derive(Debug, Clone, Copy, Default, Hash)]
 pub enum Base {
     #[default]
     Decimal,
@@ -10,7 +9,7 @@ pub enum Base {
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, Default, EnumString, Display, Hash, FromRepr)]
+#[derive(Debug, Clone, Copy, Default, Hash)]
 pub enum TemperatureUnit {
     #[default]
     Celsius,
@@ -19,7 +18,7 @@ pub enum TemperatureUnit {
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, Default, EnumString, Display, Hash, FromRepr)]
+#[derive(Debug, Clone, Copy, Default, Hash)]
 pub enum RefreshSpeed {
     VerySlow,
     Slow,
@@ -42,7 +41,7 @@ impl RefreshSpeed {
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, Default, PartialEq, EnumString, Display, Hash, FromRepr)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Hash)]
 pub enum SidebarMeterType {
     #[default]
     ProgressBar,

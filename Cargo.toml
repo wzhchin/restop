@@ -23,8 +23,6 @@ nix = { version = "0.30.1", default-features = false, features = [
     "fs",
 ] }
 serde = { version = "1.0.219", features = ["serde_derive"] }
-strum = "0.27.2"
-strum_macros = "0.27.2"
 once_cell = "1.21.3"
 hashbrown = "0.15.5"
 num_cpus = "1.17.0"

@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use chin_tools::AResult;
 use process_data::{pci_slot::PciSlot, Containerization, GpuUsageStats, ProcessData};
 use std::{collections::BTreeMap, fmt::Display, process::Command};
-use strum_macros::Display;
+
 use tracing::debug;
 
 use crate::tarits::NaNDefault;
@@ -23,7 +23,7 @@ pub struct Process {
 }
 
 // TODO: Better name?
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessAction {
     TERM,
     STOP,
