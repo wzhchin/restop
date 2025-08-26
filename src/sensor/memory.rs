@@ -269,24 +269,24 @@ pub fn get_memory_devices() -> Result<Vec<MemoryDevice>> {
             .args(["-t", "17", "-q"])
             .output()?;
         if output.status.code().unwrap_or(1) == 1 {
-            tracing::debug!("Unable to get memory information without elevated privileges");
+            log::debug!("Unable to get memory information without elevated privileges");
             bail!("no permission")
         }
-        tracing::debug!("Memory information obtained using dmidecode (unprivileged)");
+        log::debug!("Memory information obtained using dmidecode (unprivileged)");
         Ok(parse_dmidecode(String::from_utf8(output.stdout)?))
     } else {
-        tracing::debug!("Memory information obtained using udevadm");
+        log::debug!("Memory information obtained using udevadm");
         Ok(virtual_dmi)
     }
 }
 
 pub fn pkexec_dmidecode() -> Result<Vec<MemoryDevice>> {
-    tracing::debug!("Using pkexec to get memory information (dmidecode)…");
+    log::debug!("Using pkexec to get memory information (dmidecode)…");
 
     let output = Command::new("pkexec")
         .args(["--disable-internal-agent", "dmidecode", "-t", "17", "-q"])
         .output()?;
 
-    tracing::debug!("Memory information obtained using dmidecode (privileged)");
+    log::debug!("Memory information obtained using dmidecode (privileged)");
     Ok(parse_dmidecode(String::from_utf8(output.stdout)?.as_str()))
 }

@@ -35,12 +35,12 @@ static CPU_TEMPERATURE_PATH: Lazy<Option<PathBuf>> = Lazy::new(|| {
         search_for_hwmons(KNOWN_HWMONS).or_else(|| search_for_thermal_zones(KNOWN_THERMAL_ZONES));
 
     if let Some((sensor, path)) = &cpu_temperature_path {
-        tracing::debug!(
+        log::debug!(
             "CPU temperature sensor located at {} ({sensor})",
             path.display()
         );
     } else {
-        tracing::warn!("No sensor for CPU temperature found!");
+        log::warn!("No sensor for CPU temperature found!");
     }
 
     cpu_temperature_path.map(|(_, path)| path)

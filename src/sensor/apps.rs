@@ -9,7 +9,7 @@ use hashbrown::{HashMap, HashSet};
 use once_cell::sync::Lazy;
 use process_data::{pci_slot::PciSlot, Containerization, ProcessData};
 use regex::Regex;
-use tracing::debug;
+use log::debug;
 
 use crate::tarits::{NaNDefault, None2NanString};
 

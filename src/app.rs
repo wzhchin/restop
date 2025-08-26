@@ -172,11 +172,11 @@ impl ResTop {
                     })();
 
                     if let Err(err) = render_result {
-                        tracing::error!("unable to render {}", err);
+                        log::error!("unable to render {}", err);
                     }
                 });
                 if let Err(err) = draw_result {
-                    tracing::error!("Unable to draw components: {}", err);
+                    log::error!("Unable to draw components: {}", err);
                 };
 
                 execute!(stdout(), EndSynchronizedUpdate)?;

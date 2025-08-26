@@ -3,7 +3,7 @@ use chin_tools::AResult;
 use process_data::{pci_slot::PciSlot, Containerization, GpuUsageStats, ProcessData};
 use std::{collections::BTreeMap, fmt::Display, process::Command};
 
-use tracing::debug;
+use log::debug;
 
 use crate::tarits::NaNDefault;
 

@@ -255,7 +255,7 @@ impl Resource for ResProcess {
             match self._build_page(args) {
                 Ok(_) => {}
                 Err(err) => {
-                    tracing::error!("unable to render_page: {}", err);
+                    log::error!("unable to render_page: {}", err);
                     return;
                 }
             }
@@ -557,7 +557,7 @@ impl ProcessWorker {
                 self.app_context.refresh(data);
             }
             Err(err) => {
-                tracing::error!("unable to update process data: {}", err);
+                log::error!("unable to update process data: {}", err);
             }
         }
     }

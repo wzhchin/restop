@@ -90,7 +90,7 @@ pub trait Resource {
         match self._build_page(&args) {
             Ok(_) => {}
             Err(err) => {
-                tracing::error!("unable to render_page: {}", err);
+                log::error!("unable to render_page: {}", err);
                 return;
             }
         }
@@ -332,7 +332,7 @@ impl ResourceType {
                             }
                         }
                         Err(err) => {
-                            tracing::error!("unable to read GPU data: {}", err);
+                            log::error!("unable to read GPU data: {}", err);
                         }
                     }
                 }

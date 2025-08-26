@@ -13,9 +13,9 @@ static NVML: Lazy<Result<Nvml, NvmlError>> = Lazy::new(|| {
     let nvml = Nvml::init();
 
     if let Err(error) = nvml.as_ref() {
-        tracing::warn!("Connection to NVML failed, reason: {error}");
+        log::warn!("Connection to NVML failed, reason: {error}");
     } else {
-        tracing::debug!("Successfully connected to NVML");
+        log::debug!("Successfully connected to NVML");
     }
 
     nvml

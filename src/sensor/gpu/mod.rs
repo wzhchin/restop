@@ -309,7 +309,7 @@ impl Gpu {
             )
         };
 
-        tracing::debug!(
+        log::debug!(
             "Found GPU \"{}\" (PCI slot: {} · PCI ID: {vid:x}:{pid:x} · Category: {gpu_category})",
             gpu.name().unwrap_or("<unknown name>".into()),
             gpu.pci_slot(),
