@@ -62,6 +62,10 @@ impl<'r, T> IterRing<'r, T> {
     pub fn len(&self) -> usize {
         self.len
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
 }
 
 impl<'r, T> Iterator for IterRing<'r, T> {

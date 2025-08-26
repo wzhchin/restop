@@ -247,7 +247,7 @@ fn parse_virtual_dmi<S: AsRef<str>>(dmi: S) -> Vec<MemoryDevice> {
             .and_then(|regex| regex.captures(dmi))
             .and_then(|captures| captures.get(1))
             .and_then(|capture| capture.as_str().parse::<usize>().ok())
-            .map_or(true, |int| int != 0);
+            != Some(0);
 
         devices.push(MemoryDevice {
             speed_mts: speed,

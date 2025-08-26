@@ -1,5 +1,8 @@
 use std::{
-    collections::HashMap, ffi::OsString, fmt::Display, path::{Path, PathBuf}
+    collections::HashMap,
+    ffi::OsString,
+    fmt::Display,
+    path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result};
@@ -163,8 +166,8 @@ impl PartialEq for NetworkInterface {
 impl NetworkInterface {
     pub fn get_sysfs_paths() -> Result<Vec<PathBuf>> {
         let mut list = Vec::new();
-        let mut entries = std::fs::read_dir("/sys/class/net")?;
-        while let Some(entry) = entries.next() {
+        let entries = std::fs::read_dir("/sys/class/net")?;
+        for entry in entries {
             let entry = entry?;
             let block_device = entry.file_name().to_string_lossy().to_string();
             if block_device.starts_with("lo") {
@@ -296,7 +299,7 @@ impl NetworkInterface {
             .context("parsing failure")
     }
 
-    /// Returns the appropriate Icon for the type of drive
+    // Returns the appropriate Icon for the type of drive
     /*     pub fn icon(&self) -> String {
         match self.interface_type {
             InterfaceType::Bluetooth => String::from("bluetooth-symbolic").into(),
@@ -327,7 +330,7 @@ impl NetworkInterface {
     }
 
     pub fn default_icon() -> String {
-        String::from("unknown-network-type-symbolic").into()
+        String::from("unknown-network-type-symbolic")
     }
 }
 

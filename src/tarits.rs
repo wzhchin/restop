@@ -59,14 +59,14 @@ pub trait None2NanString {
 impl None2NaNDef for Option<&str> {
     fn or_nan_def(&self) -> &str {
         match self {
-            Some(o) => *o,
+            Some(o) => o,
             None => "N/A",
         }
     }
 
     fn or_unk_def(&self) -> &str {
         match self {
-            Some(o) => *o,
+            Some(o) => o,
             None => "Unknown",
         }
     }

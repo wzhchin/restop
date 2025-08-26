@@ -72,7 +72,7 @@ impl Resource for ResGPU {
 
     fn do_sensor(req: Self::Req) -> AResult<SensorResultType> {
         let data = GpuData::new(&req);
-        Ok(SensorResultType::SyncResult(SensorRsp::GPU(data)))
+        Ok(SensorResultType::SyncResult(SensorRsp::GPU(data).into()))
     }
 
     fn update_data(&mut self, data: &Self::Rsp) {
@@ -88,10 +88,14 @@ impl Resource for ResGPU {
         let width = args.width;
         let block = GroupedLines::builder(width, &self.theme)
             .kv("UR", self.total_usage.or_nan(|e| format!("{:.1} %", e)))
-            .lines(
-                ls_history_graph(width, &self.history, 1., 0., 3, ratatui::style::Color::Red)
-                    .into(),
-            )
+            .lines(ls_history_graph(
+                width,
+                &self.history,
+                1.,
+                0.,
+                3,
+                ratatui::style::Color::Red,
+            ))
             .active(args.focused)
             .build(format!(
                 "GPU({})",

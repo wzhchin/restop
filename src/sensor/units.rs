@@ -34,7 +34,7 @@ pub fn convert_seconds(seconds: u64) -> String {
         return String::from("00:00:00");
     }
 
-    let durations = vec![
+    let durations = [
         ("y ", 365 * 24 * 60 * 60),
         ("d ", 24 * 60 * 60),
         (":", 60 * 60),
@@ -176,8 +176,6 @@ pub fn conver_storage_width4(bytes: f64) -> String {
         format!("{:.0}  B", bytes)
     } else if bytes < 100.0 {
         format!("{:.0} B", bytes)
-    } else if bytes < 1000.0 {
-        format!("{:.0}B", bytes)
     } else if bytes < 1000.0 {
         format!("{:.0}B", bytes)
     } else if bytes < 1024.0_f64 * 10.0 {
@@ -392,7 +390,7 @@ mod test {
         println!("{}", convert_seconds(60));
         println!("{}", convert_seconds(120));
         println!("{}", convert_seconds(200));
-        println!("{}", convert_seconds(0231));
-        println!("{}", convert_seconds(01002));
+        println!("{}", convert_seconds(231));
+        println!("{}", convert_seconds(1002));
     }
 }

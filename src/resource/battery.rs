@@ -55,14 +55,13 @@ impl Resource for ResBattery {
 
     fn do_sensor(req: Self::Req) -> AResult<SensorResultType> {
         let data = BatteryData::new(req.as_ref());
-        Ok(SensorResultType::SyncResult(SensorRsp::Battery(Arc::new(
-            data,
-        ))))
+        Ok(SensorResultType::SyncResult(
+            SensorRsp::Battery(Arc::new(data)).into(),
+        ))
     }
 
     fn get_id(&self) -> &str {
-        &self
-            .info
+        self.info
             .sysfs_path
             .as_path()
             .to_str()

@@ -52,7 +52,7 @@ impl ResNetwork {
         let rns = network_paths
             .iter()
             .map(|path| ResNetwork {
-                info: Arc::new(NetworkInterface::from_sysfs(&path)),
+                info: Arc::new(NetworkInterface::from_sysfs(path)),
                 theme: theme.clone(),
                 old_received_bytes: None,
                 old_sent_bytes: None,
@@ -90,7 +90,9 @@ impl Resource for ResNetwork {
 
     fn do_sensor(req: Self::Req) -> AResult<SensorResultType> {
         let data = NetworkData::new(&req);
-        Ok(SensorResultType::SyncResult(SensorRsp::Network(data)))
+        Ok(SensorResultType::SyncResult(
+            SensorRsp::Network(data).into(),
+        ))
     }
 
     fn update_data(&mut self, data: &Self::Rsp) {
@@ -124,18 +126,12 @@ impl Resource for ResNetwork {
                 None
             };
 
-            match sent_delta.as_ref() {
-                Some(ok) => {
-                    self.sendhistory.insert_at_first(*ok);
-                }
-                None => {}
+            if let Some(ok) = sent_delta.as_ref() {
+                self.sendhistory.insert_at_first(*ok);
             }
 
-            match received_delta.as_ref() {
-                Some(ok) => {
-                    self.receive_history.insert_at_first(*ok);
-                }
-                None => {}
+            if let Some(ok) = received_delta.as_ref() {
+                self.receive_history.insert_at_first(*ok);
             }
 
             self.sent_speed = sent_delta;
@@ -143,18 +139,20 @@ impl Resource for ResNetwork {
 
             if self
                 .sent_speed
-                .map_or(false, |e| e > self.highest_sent_speed.get())
+                .is_some_and(|e| e > self.highest_sent_speed.get())
             {
-                sent_delta.as_ref().map(|e| self.highest_sent_speed.set(*e));
+                if let Some(e) = sent_delta.as_ref() {
+                    self.highest_sent_speed.set(*e)
+                }
             }
 
             if self
                 .received_speed
-                .map_or(false, |e| e > self.highest_received_speed.get())
+                .is_some_and(|e| e > self.highest_received_speed.get())
             {
-                received_delta
-                    .as_ref()
-                    .map(|e| self.highest_received_speed.set(*e));
+                if let Some(e) = received_delta.as_ref() {
+                    self.highest_received_speed.set(*e)
+                }
             }
         }
 
@@ -180,28 +178,22 @@ impl Resource for ResNetwork {
                         .or_nan(|e| convert_storage(**e, false)),
                 ),
             ])
-            .lines(
-                ls_history_graph(
-                    width,
-                    &self.sendhistory,
-                    self.highest_sent_speed.get(),
-                    0.,
-                    3,
-                    ratatui::style::Color::Yellow,
-                )
-                .into(),
-            )
-            .lines(
-                ls_history_graph(
-                    width,
-                    &self.receive_history,
-                    self.highest_received_speed.get(),
-                    0.,
-                    3,
-                    ratatui::style::Color::Blue,
-                )
-                .into(),
-            )
+            .lines(ls_history_graph(
+                width,
+                &self.sendhistory,
+                self.highest_sent_speed.get(),
+                0.,
+                3,
+                ratatui::style::Color::Yellow,
+            ))
+            .lines(ls_history_graph(
+                width,
+                &self.receive_history,
+                self.highest_received_speed.get(),
+                0.,
+                3,
+                ratatui::style::Color::Blue,
+            ))
             .active(args.focused)
             .build(format!(
                 "{}({})",
@@ -234,34 +226,28 @@ impl Resource for ResNetwork {
         let usage = GroupedLines::builder(width, &self.theme)
             .kv_sep(
                 "Receiving",
-                &label(&self.receive_history, &self.highest_received_speed.get()),
+                label(&self.receive_history, &self.highest_received_speed.get()),
             )
-            .lines(
-                ls_history_graph(
-                    width - 2,
-                    &self.receive_history,
-                    self.highest_received_speed.get(),
-                    0.,
-                    3,
-                    ratatui::style::Color::Blue,
-                )
-                .into(),
-            )
+            .lines(ls_history_graph(
+                width - 2,
+                &self.receive_history,
+                self.highest_received_speed.get(),
+                0.,
+                3,
+                ratatui::style::Color::Blue,
+            ))
             .kv_sep(
                 "Sending",
-                &label(&self.sendhistory, &self.highest_sent_speed.get()),
+                label(&self.sendhistory, &self.highest_sent_speed.get()),
             )
-            .lines(
-                ls_history_graph(
-                    width - 2,
-                    &self.sendhistory,
-                    self.highest_sent_speed.get(),
-                    0.,
-                    3,
-                    ratatui::style::Color::Yellow,
-                )
-                .into(),
-            )
+            .lines(ls_history_graph(
+                width - 2,
+                &self.sendhistory,
+                self.highest_sent_speed.get(),
+                0.,
+                3,
+                ratatui::style::Color::Yellow,
+            ))
             .kv_sep(
                 "Total Received",
                 self.old_received_bytes

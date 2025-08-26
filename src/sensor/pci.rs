@@ -5,7 +5,7 @@ use append_only_vec::AppendOnlyVec;
 use once_cell::sync::Lazy;
 use tracing::error;
 
-static DEVICES: Lazy<AppendOnlyVec<Device>> = Lazy::new(|| AppendOnlyVec::new());
+static DEVICES: Lazy<AppendOnlyVec<Device>> = Lazy::new(AppendOnlyVec::new);
 
 pub fn get_device(vid: &u16, pid: &u16) -> Option<&'static Device> {
     let vendor = DEVICES.iter().find(|e| e.vendor_id == *vid && e.id == *pid);

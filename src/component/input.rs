@@ -1,5 +1,8 @@
 use crossterm::event::{Event, KeyEvent, KeyModifiers};
-use ratatui::{layout::Rect, text::Line};
+use ratatui::{
+    layout::{Position, Rect},
+    text::Line,
+};
 
 #[derive(Debug)]
 pub enum InputIn {
@@ -23,6 +26,12 @@ pub struct Input {
     cursor_position: usize,
     show_start: usize,
     input_move: InputMove,
+}
+
+impl Default for Input {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Input {
@@ -67,7 +76,7 @@ impl Input {
 
     fn move_end(&mut self, width: usize) {
         self.cursor_position = self.input.len() - 1;
-        self.show_start = self.cursor_position.saturating_sub(width as usize)
+        self.show_start = self.cursor_position.saturating_sub(width)
     }
 
     fn delete_char(&mut self) {
@@ -89,7 +98,7 @@ impl Input {
             // By leaving the selected one out, it is forgotten and therefore deleted.
             self.input = before_char_to_delete.chain(after_char_to_delete).collect();
 
-            self.show_start = self.show_start.saturating_sub(1 as usize);
+            self.show_start = self.show_start.saturating_sub(1_usize);
             self.move_cursor_left();
         }
     }
@@ -105,20 +114,16 @@ impl Input {
             InputMove::Left => {
                 if self.cursor_position - self.show_start > width {
                     self.show_start = self.cursor_position.saturating_sub(width);
-                } else {
-                    if self.cursor_position <= self.show_start {
-                        self.show_start = self.show_start.saturating_sub(1);
-                    }
+                } else if self.cursor_position <= self.show_start {
+                    self.show_start = self.show_start.saturating_sub(1);
                 }
             }
 
             InputMove::Right => {
                 if self.cursor_position - self.show_start > width {
                     self.show_start = self.cursor_position.saturating_sub(width);
-                } else {
-                    if self.cursor_position >= self.show_start + rect.width as usize - 1 {
-                        self.show_start = self.show_start.saturating_add(1);
-                    }
+                } else if self.cursor_position >= self.show_start + rect.width as usize - 1 {
+                    self.show_start = self.show_start.saturating_add(1);
                 }
             }
             InputMove::End => {
@@ -127,14 +132,11 @@ impl Input {
             InputMove::Nil => {}
         }
 
-        f.render_widget(
-            Line::from(self.input[self.show_start..].to_string()),
-            rect.clone(),
-        );
-        f.set_cursor(
-            rect.x + (self.cursor_position - self.show_start) as u16,
-            rect.y,
-        );
+        f.render_widget(Line::from(self.input[self.show_start..].to_string()), *rect);
+        f.set_cursor_position(Position {
+            x: rect.x + (self.cursor_position - self.show_start) as u16,
+            y: rect.y,
+        });
     }
 
     pub fn handle_event(&mut self, key: &KeyEvent) -> bool {

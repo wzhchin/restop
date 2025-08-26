@@ -1,7 +1,7 @@
 use std::{
     cell::Cell,
-    collections::LinkedList,
     io::{stdout, Stdout},
+    sync::Arc,
     thread,
     time::{Duration, SystemTime},
 };
@@ -51,7 +51,7 @@ pub struct ResTop {
 pub enum ResourceEvent {
     Resize(u16, u16),
     KeyEvent(KeyEvent),
-    SensorRsp(SensorRsp),
+    SensorRsp(Arc<SensorRsp>),
     FocusedIndex(usize),
     Quit,
 }
@@ -138,7 +138,7 @@ impl ResTop {
         let last_sync_ts = Cell::new(SystemTime::UNIX_EPOCH);
         let lasy_draw_ts = Cell::new(SystemTime::UNIX_EPOCH);
 
-        Ok(loop {
+        let _: () = loop {
             let now = SystemTime::now();
             let sync_diff = now
                 .duration_since(last_sync_ts.get())
@@ -166,7 +166,7 @@ impl ResTop {
                         execute!(stdout(), BeginSynchronizedUpdate)?;
 
                         self.layout
-                            .render(f, &mut self.resources, self.focused_index.clone());
+                            .render(f, &mut self.resources, self.focused_index);
 
                         Ok(())
                     })();
@@ -218,6 +218,7 @@ impl ResTop {
                 }
                 _ => {}
             }
-        })
+        };
+        Ok(())
     }
 }

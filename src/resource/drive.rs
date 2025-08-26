@@ -180,11 +180,11 @@ impl ResDrive {
         self.old_stats.replace(disk_stats.clone());
     }
 
-    pub fn update_partition(&mut self, partitions: &Vec<Partition>) {
+    pub fn update_partition(&mut self, partitions: &[Partition]) {
         self.partitions = partitions
-            .into_iter()
+            .iter()
             .filter(|e| e.contains(self.info.block_device.as_str()))
-            .map(|e| e.clone())
+            .cloned()
             .collect();
     }
 }
@@ -211,12 +211,13 @@ impl Resource for ResDrive {
     fn do_sensor(req: Self::Req) -> AResult<SensorResultType> {
         let data = DriveData::new(&req);
         let partitions = Partition::fetch()?;
-        Ok(SensorResultType::SyncResult(SensorRsp::Drive(
-            ResDriveRsp {
-                data: data,
+        Ok(SensorResultType::SyncResult(
+            SensorRsp::Drive(ResDriveRsp {
+                data,
                 partitions: Some(partitions),
-            },
-        )))
+            })
+            .into(),
+        ))
     }
 
     fn update_data(&mut self, data: &Self::Rsp) {
@@ -236,7 +237,7 @@ impl Resource for ResDrive {
                     .newest()
                     .or_nan(|e| format!("{:.1} %", e)),
             )
-            .lines(self.activity_graph(width).into())
+            .lines(self.activity_graph(width))
             .active(args.focused)
             .build(format!("Drive({})", self.supply_name))?;
 
@@ -264,39 +265,33 @@ impl Resource for ResDrive {
                     .newest()
                     .or_nan(|e| format!("{:.1} %", **e * 100.)),
             )
-            .lines(self.activity_graph(width - 2).into())
+            .lines(self.activity_graph(width - 2))
             .empty_sep()
             .kv(
                 "Read Speed",
-                &label(&self.read_speed_history, &self.read_highest.get()),
+                label(&self.read_speed_history, &self.read_highest.get()),
             )
-            .lines(
-                ls_history_graph(
-                    width - 2,
-                    &self.write_speed_history,
-                    self.read_highest.get(),
-                    0.,
-                    3,
-                    ratatui::style::Color::Green,
-                )
-                .into(),
-            )
+            .lines(ls_history_graph(
+                width - 2,
+                &self.write_speed_history,
+                self.read_highest.get(),
+                0.,
+                3,
+                ratatui::style::Color::Green,
+            ))
             .empty_sep()
             .kv(
                 "Write Speed",
-                &label(&self.write_speed_history, &self.write_highest.get()),
+                label(&self.write_speed_history, &self.write_highest.get()),
             )
-            .lines(
-                ls_history_graph(
-                    width - 2,
-                    &self.write_speed_history,
-                    self.write_highest.get(),
-                    0.,
-                    3,
-                    ratatui::style::Color::Green,
-                )
-                .into(),
-            )
+            .lines(ls_history_graph(
+                width - 2,
+                &self.write_speed_history,
+                self.write_highest.get(),
+                0.,
+                3,
+                ratatui::style::Color::Green,
+            ))
             .empty_sep()
             .kv_sep("Total Read", convert_storage(self.read_total.get(), true))
             .kv_sep("Total Write", convert_storage(self.write_total.get(), true))

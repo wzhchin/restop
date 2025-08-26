@@ -78,7 +78,7 @@ impl Resource for ResCPU {
 
     fn do_sensor(req: Self::Req) -> AResult<SensorResultType> {
         let data = CpuData::fetch(req)?;
-        Ok(SensorResultType::SyncResult(SensorRsp::CPU(data)))
+        Ok(SensorResultType::SyncResult(SensorRsp::CPU(data).into()))
     }
 
     fn update_data(&mut self, data: &Self::Rsp) {
@@ -128,7 +128,7 @@ impl Resource for ResCPU {
 
         self.old_total_usage.set(*new_total_usage);
         self.old_thread_usages.replace(new_thread_usages.clone());
-        self.tempurature = temperature.clone();
+        self.tempurature = *temperature;
         self.frequences.replace(frequencies.clone());
     }
 

@@ -287,7 +287,10 @@ impl App {
         !self.processes.is_empty()
     }
 
-    pub fn processes_iter<'a>(&'a self, apps: &'a AppsContext) -> impl Iterator<Item = &Process> {
+    pub fn processes_iter<'a>(
+        &'a self,
+        apps: &'a AppsContext,
+    ) -> impl Iterator<Item = &'a Process> {
         apps.all_processes()
             .filter(move |process| self.processes.contains(&process.data.pid))
     }
@@ -295,7 +298,7 @@ impl App {
     pub fn processes_iter_mut<'a>(
         &'a mut self,
         apps: &'a mut AppsContext,
-    ) -> impl Iterator<Item = &mut Process> {
+    ) -> impl Iterator<Item = &'a mut Process> {
         apps.all_processes_mut()
             .filter(move |process| self.processes.contains(&process.data.pid))
     }
@@ -569,12 +572,10 @@ impl AppsContext {
         self.apps.get(id)
     }
 
-    #[must_use]
     pub fn all_processes(&self) -> impl Iterator<Item = &Process> {
         self.processes.values()
     }
 
-    #[must_use]
     pub fn all_processes_mut(&mut self) -> impl Iterator<Item = &mut Process> {
         self.processes.values_mut()
     }
@@ -670,7 +671,7 @@ impl AppsContext {
                             )
                             .context("unable to add seconds to boot time")
                     })
-                    .and_then(|time| Ok(time.to_string()))
+                    .map(|time| time.to_string())
                     .ok()
                     .or_nan_owned();
 
@@ -742,7 +743,7 @@ impl AppsContext {
             .sum();
 
         let system_running_since = boot_time()
-            .and_then(|boot_time| Ok(boot_time.to_string()))
+            .map(|boot_time| boot_time.to_string())
             .ok()
             .or_nan_owned();
 

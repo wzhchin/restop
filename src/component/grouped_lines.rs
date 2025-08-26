@@ -113,9 +113,7 @@ impl<'a> Widget for GroupedLines<'a> {
                 s.push(Span::raw(" "));
 
                 let mut title = Span::from(self.title.as_str());
-                if self.focused {
-                    title = title.bold();
-                } else if self.active {
+                if self.focused || self.active {
                     title = title.bold();
                 }
 

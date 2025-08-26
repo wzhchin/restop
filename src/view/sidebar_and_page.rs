@@ -3,7 +3,7 @@ use crossterm::event::KeyCode;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Style, Stylize},
-    text::{Line, Span, Text},
+    text::{Line, Span},
     Frame,
 };
 
@@ -41,8 +41,8 @@ impl SidebarAndPage {
         frame.render_widget(header, top);
     }
 
-    fn overview(&mut self, frame: &mut Frame, resources: &mut Vec<ResourceType>) {
-        let rect = self.sidebar.clone();
+    fn overview(&mut self, frame: &mut Frame, resources: &mut [ResourceType]) {
+        let rect = self.sidebar;
         let top = Rect {
             y: rect.y,
             height: 1,
@@ -58,7 +58,7 @@ impl SidebarAndPage {
         };
 
         let mut args = OverviewArg {
-            width: rect.width.clone(),
+            width: rect.width,
             focused: !self.page_focused,
         };
         let mut overviews = vec![];
@@ -68,8 +68,7 @@ impl SidebarAndPage {
             }
         }
         self.sidebar_state.update_blocks(overviews);
-        self.sidebar_state
-            .render(frame, rect.clone(), !self.page_focused);
+        self.sidebar_state.render(frame, rect, !self.page_focused);
     }
 }
 
@@ -105,7 +104,7 @@ impl Navigator for SidebarAndPage {
             if let Some(rt) = self
                 .sidebar_state
                 .focused_index()
-                .or_else(|| Some(0))
+                .or(Some(0))
                 .and_then(|id| resources.get_mut(id))
             {
                 rt.cached_page_state().focus_prev();
@@ -120,7 +119,7 @@ impl Navigator for SidebarAndPage {
             if let Some(rt) = self
                 .sidebar_state
                 .focused_index()
-                .or_else(|| Some(0))
+                .or(Some(0))
                 .and_then(|id| resources.get_mut(id))
             {
                 rt.cached_page_state().focus_next();
@@ -137,7 +136,7 @@ impl Navigator for SidebarAndPage {
         _: Option<usize>,
     ) {
         if self.sidebar.is_empty() || self.page.is_empty() {
-            self.update_layout(frame.size())
+            self.update_layout(frame.area())
         }
 
         self.overview(frame, resources);
@@ -145,7 +144,7 @@ impl Navigator for SidebarAndPage {
         if let Some(rt) = self
             .sidebar_state
             .focused_index()
-            .or_else(|| Some(0))
+            .or(Some(0))
             .and_then(|id| resources.get_mut(id))
         {
             let mut args = PageArg {
@@ -161,7 +160,7 @@ impl Navigator for SidebarAndPage {
             if let Some(rt) = self
                 .sidebar_state
                 .focused_index()
-                .or_else(|| Some(0))
+                .or(Some(0))
                 .and_then(|id: usize| args.resources.get_mut(id))
             {
                 let handled = rt.handle_navi_event(event);

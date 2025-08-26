@@ -21,7 +21,7 @@ pub fn ls_kv(
     key_style: Style,
     value_style: Style,
 ) -> Vec<Line<'static>> {
-    if width <= 0 {
+    if width == 0 {
         return vec![];
     }
 
@@ -46,18 +46,16 @@ pub fn ls_kv(
 
             lines
         }
+    } else if value.len() < width as usize {
+        vec![vec![s_value(value, value_style)].into()]
     } else {
-        if value.len() < width as usize {
-            vec![vec![s_value(value, value_style)].into()]
-        } else {
-            let mut lines = vec![];
+        let mut lines = vec![];
 
-            split_by_len(value, width as usize)
-                .iter()
-                .for_each(|e| lines.push(Line::from(s_value(e, value_style))));
+        split_by_len(value, width as usize)
+            .iter()
+            .for_each(|e| lines.push(Line::from(s_value(e, value_style))));
 
-            lines
-        }
+        lines
     }
 }
 
@@ -86,7 +84,7 @@ pub fn s_percent_graph(
     let value_width = graph_width as usize * percent as usize / 100;
     let color = percent / (100 / colors.len() as u16);
 
-    let color = if color <= 0 {
+    let color = if color == 0 {
         colors[0]
     } else if color as usize >= colors.len() {
         *colors.last().unwrap()
@@ -125,7 +123,7 @@ pub fn s_percent_graph(
     ]
 }
 
-pub fn s_history_graph<'r>(
+pub fn s_history_graph(
     width: u16,
     ring: &Ring<f64>,
     max_value: f64,
@@ -133,8 +131,6 @@ pub fn s_history_graph<'r>(
     line_height: u16,
     color: Color,
 ) -> Vec<Span<'static>> {
-    let width = width;
-
     const MAX_HEIGHT: usize = 4;
 
     let bars = [
@@ -156,7 +152,7 @@ pub fn s_history_graph<'r>(
 
     values.chunks(2).for_each(|e| {
         let left = e
-            .get(0)
+            .first()
             .map(|e| ((**e - min_value) / bar_sep).round() as usize)
             .unwrap_or(0);
         let right = e
@@ -165,7 +161,7 @@ pub fn s_history_graph<'r>(
             .unwrap_or(0);
 
         for i in 1..=line_height {
-            let max = i as usize * MAX_HEIGHT as usize;
+            let max = i as usize * MAX_HEIGHT;
             let r = if max <= left {
                 MAX_HEIGHT
             } else {
@@ -177,7 +173,7 @@ pub fn s_history_graph<'r>(
                 (right + MAX_HEIGHT).saturating_sub(max)
             };
 
-            lines.get_mut(i as usize - 1).and_then(|t| {
+            if let Some(line) = lines.get_mut(i as usize - 1) {
                 let mut sym = bars.get(l).and_then(|v| v.get(r)).unwrap_or(&'?');
                 if i == 1 && line_height > 1 {
                     sym = bars
@@ -185,13 +181,12 @@ pub fn s_history_graph<'r>(
                         .and_then(|v| v.get(r.add(1).clamp(1, MAX_HEIGHT)))
                         .unwrap_or(&'?');
                 }
-                t.insert(0, *sym);
-                Some(())
-            });
+                line.insert(0, *sym);
+            }
         }
     });
 
-    let true_len = (values.len() + 1) / 2;
+    let true_len = values.len().div_ceil(2);
     if (width as usize) >= true_len {
         let limit = if line_height > 1 { 1 } else { 0 };
         for line in &mut lines.iter_mut().take(limit) {
@@ -214,7 +209,7 @@ pub fn s_history_graph<'r>(
         .collect()
 }
 
-pub fn ls_history_graph<'r>(
+pub fn ls_history_graph(
     width: u16,
     ring: &Ring<f64>,
     max_value: f64,
@@ -224,7 +219,7 @@ pub fn ls_history_graph<'r>(
 ) -> Vec<Line<'static>> {
     s_history_graph(width, ring, max_value, min_value, line_height, color)
         .into_iter()
-        .map(|e| Line::from(e))
+        .map(Line::from)
         .collect()
 }
 
@@ -239,7 +234,7 @@ pub fn s_value(label: &str, style: Style) -> Span<'static> {
 pub fn ls_italic(label: &str, width: u16) -> Vec<Line<'static>> {
     ls_kv(
         None,
-        &label,
+        label,
         width,
         Style::new(),
         Style::new().add_modifier(Modifier::ITALIC),
@@ -247,11 +242,11 @@ pub fn ls_italic(label: &str, width: u16) -> Vec<Line<'static>> {
 }
 
 pub fn ls_common(label: &str, width: u16) -> Vec<Line<'static>> {
-    ls_kv(None, &label, width, Style::new(), Style::new())
+    ls_kv(None, label, width, Style::new(), Style::new())
 }
 
 pub fn ls_style(label: &str, width: u16, style: Style) -> Vec<Line<'static>> {
-    ls_kv(None, &label, width, Style::new(), style)
+    ls_kv(None, label, width, Style::new(), style)
 }
 
 pub trait PaddingH {

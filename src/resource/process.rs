@@ -27,6 +27,7 @@ use crate::{
         render_border, s_label,
         stateful_lines::{StatefulColumn, StatefulLinesType},
     },
+    resource::SensorRsp,
     sensor::{
         apps::AppsContext,
         process::{read_proc_loadavg, read_proc_uptime, LoadAvg, ProcessItem},
@@ -39,15 +40,15 @@ use crate::{
 
 use super::{Resource, SensorResultType};
 
-pub const PROCESS_ID: &'static str = "PROCESS";
+pub const PROCESS_ID: &str = "PROCESS";
 
 static PROCESS_WORKER_CHANNEL: Lazy<(Sender<ProcessMsg>, Receiver<ProcessMsg>)> =
-    Lazy::new(|| flume::unbounded());
+    Lazy::new(flume::unbounded);
 static PROCESS_SORT_TYPE: Lazy<RwLock<Option<(ProcessCell, bool)>>> =
     Lazy::new(|| RwLock::new(None));
 
 fn get_process_sort() -> Option<(ProcessCell, bool)> {
-    PROCESS_SORT_TYPE.read().unwrap().clone()
+    *PROCESS_SORT_TYPE.read().unwrap()
 }
 
 fn try_change_sort(c: ProcessCell) {
@@ -111,9 +112,7 @@ impl Resource for ResProcess {
         PROCESS_ID
     }
 
-    fn get_req(&self) -> Self::Req {
-        ()
-    }
+    fn get_req(&self) -> Self::Req {}
 
     fn overview_content(&self, args: &mut OverviewArg) -> AResult<GroupedLines<'static>> {
         let width = args.width;
@@ -275,6 +274,7 @@ impl Resource for ResProcess {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[allow(dead_code)]
+#[allow(clippy::upper_case_acronyms)]
 enum ProcessCell {
     PID,
     PRG,
@@ -338,7 +338,7 @@ impl ProcessCell {
         noodle
     }
 
-    fn to_value(&self, data: &ProcessItem) -> Span<'static> {
+    fn to_value(self, data: &ProcessItem) -> Span<'static> {
         let s = match self {
             ProcessCell::PID => self.keep_width(data.pid.to_string().as_str()),
             ProcessCell::USER => self.keep_width(data.user.as_str()),
@@ -374,7 +374,7 @@ impl ProcessCell {
         s.into()
     }
 
-    fn to_label(&self, suffix: char) -> Span<'static> {
+    fn to_label(self, suffix: char) -> Span<'static> {
         let mut s = String::new();
         let label = match self {
             ProcessCell::PID => "PID",
@@ -453,7 +453,7 @@ impl LineBuilder {
 
     fn to_header(&self) -> Line<'static> {
         let mut spans: Vec<Span<'static>> = vec![];
-        let cmp = { PROCESS_SORT_TYPE.read().unwrap().clone() };
+        let cmp = { *PROCESS_SORT_TYPE.read().unwrap() };
 
         for ele in self.labels.iter() {
             let suffix = if let Some((cell, desc)) = cmp {
@@ -507,19 +507,20 @@ impl ProcessWorker {
                         ProcessMsg::Detect => {
                             if let Ok(uptime) = read_proc_uptime() {
                                 let _ = result_tx.send(ResourceEvent::SensorRsp(
-                                    crate::resource::SensorRsp::Process(ProcessRsp::Uptime(uptime)),
+                                    SensorRsp::Process(ProcessRsp::Uptime(uptime)).into(),
                                 ));
                             }
                             if let Ok(load) = read_proc_loadavg() {
                                 let _ = result_tx.send(ResourceEvent::SensorRsp(
-                                    crate::resource::SensorRsp::Process(ProcessRsp::LoadAvg(load)),
+                                    SensorRsp::Process(ProcessRsp::LoadAvg(load)).into(),
                                 ));
                             }
                             worker.updata_data();
                             let _ = result_tx.send(ResourceEvent::SensorRsp(
-                                crate::resource::SensorRsp::Process(ProcessRsp::Processes(
-                                    Arc::new(worker.get_process_items()),
-                                )),
+                                SensorRsp::Process(ProcessRsp::Processes(Arc::new(
+                                    worker.get_process_items(),
+                                )))
+                                .into(),
                             ));
                         }
                         ProcessMsg::Filter(fileter) => {
@@ -529,16 +530,18 @@ impl ProcessWorker {
                                 worker.filter.take();
                             }
                             let _ = result_tx.send(ResourceEvent::SensorRsp(
-                                crate::resource::SensorRsp::Process(ProcessRsp::Processes(
-                                    Arc::new(worker.get_process_items()),
-                                )),
+                                SensorRsp::Process(ProcessRsp::Processes(Arc::new(
+                                    worker.get_process_items(),
+                                )))
+                                .into(),
                             ));
                         }
                         ProcessMsg::ReadOnly => {
                             let _ = result_tx.send(ResourceEvent::SensorRsp(
-                                crate::resource::SensorRsp::Process(ProcessRsp::Processes(
-                                    Arc::new(worker.get_process_items()),
-                                )),
+                                SensorRsp::Process(ProcessRsp::Processes(Arc::new(
+                                    worker.get_process_items(),
+                                )))
+                                .into(),
                             ));
                         }
                     }

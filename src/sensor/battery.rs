@@ -154,8 +154,8 @@ pub struct Battery {
 impl Battery {
     pub fn get_sysfs_paths() -> Result<Vec<PathBuf>> {
         let mut list = Vec::new();
-        let mut entries = std::fs::read_dir("/sys/class/power_supply")?;
-        while let Some(entry) = entries.next() {
+        let entries = std::fs::read_dir("/sys/class/power_supply")?;
+        for entry in entries {
             let entry = entry?;
             if std::fs::read_to_string(entry.path().join("type"))
                 .unwrap_or_default()

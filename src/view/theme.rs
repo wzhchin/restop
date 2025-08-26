@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::style::{Color, Modifier, Style};
 
 pub type SharedTheme = Arc<Theme>;
 
@@ -32,10 +32,12 @@ impl Theme {
         }
     }
 
+    #[allow(unused_variables)]
     pub fn value(&self, focused: bool) -> Style {
         Style::default()
     }
 
+    #[allow(unused_variables)]
     pub fn key(&self, focused: bool) -> Style {
         Style::default().fg(self.label_fg)
     }

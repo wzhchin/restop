@@ -118,7 +118,7 @@ pub enum SensorRsp {
 }
 
 pub enum SensorResultType {
-    SyncResult(SensorRsp),
+    SyncResult(Arc<SensorRsp>),
     AsyncResult,
 }
 
@@ -128,9 +128,20 @@ impl SensorRsp {
             SensorRsp::CPU(_) => "CPU",
             SensorRsp::Memory(_) => "MEM",
             SensorRsp::GPU(res) => res.as_ref().map_or("GPU", |e| &e.id),
-            SensorRsp::Drive(rsp) => rsp.data.inner.sysfs_path.as_path().to_str().unwrap_or("drive"),
+            SensorRsp::Drive(rsp) => rsp
+                .data
+                .inner
+                .sysfs_path
+                .as_path()
+                .to_str()
+                .unwrap_or("drive"),
             SensorRsp::Network(data) => data.sysfs_path.as_str(),
-            SensorRsp::Battery(data) => data.inner.sysfs_path.as_path().to_str().unwrap_or("battery"),
+            SensorRsp::Battery(data) => data
+                .inner
+                .sysfs_path
+                .as_path()
+                .to_str()
+                .unwrap_or("battery"),
             SensorRsp::Process(_) => "process",
         }
     }
@@ -162,12 +173,18 @@ impl ResourceType {
         let tx = tx.clone();
         let rsp = match self {
             ResourceType::CPU(rt) => SensorReq::CPU(rt.get_req()),
-            ResourceType::Memory(rt) => SensorReq::Memory(rt.get_req()),
+            ResourceType::Memory(rt) => {
+                let _: () = rt.get_req();
+                SensorReq::Memory(())
+            }
             ResourceType::GPU(rt) => SensorReq::GPU(rt.get_req()),
             ResourceType::Drive(rt) => SensorReq::Drive(rt.get_req()),
             ResourceType::Network(rt) => SensorReq::Network(rt.get_req()),
             ResourceType::Battery(rt) => SensorReq::Battery(rt.get_req()),
-            ResourceType::Process(rt) => SensorReq::Process(rt.get_req()),
+            ResourceType::Process(rt) => {
+                let _: () = rt.get_req();
+                SensorReq::Process(())
+            }
         };
         tx.send(rsp).unwrap();
     }
@@ -263,13 +280,13 @@ impl ResourceType {
             const MAX_WIDTH: u16 = 90;
 
             match self {
-                ResourceType::CPU(rt) => rt.render_page(frame, &mut args, MAX_WIDTH),
-                ResourceType::Memory(rt) => rt.render_page(frame, &mut args, MAX_WIDTH),
-                ResourceType::GPU(rt) => rt.render_page(frame, &mut args, MAX_WIDTH),
-                ResourceType::Drive(rt) => rt.render_page(frame, &mut args, MAX_WIDTH),
-                ResourceType::Network(rt) => rt.render_page(frame, &mut args, MAX_WIDTH),
-                ResourceType::Battery(rt) => rt.render_page(frame, &mut args, MAX_WIDTH),
-                ResourceType::Process(rt) => rt.render_page(frame, &mut args, MAX_WIDTH),
+                ResourceType::CPU(rt) => rt.render_page(frame, &args, MAX_WIDTH),
+                ResourceType::Memory(rt) => rt.render_page(frame, &args, MAX_WIDTH),
+                ResourceType::GPU(rt) => rt.render_page(frame, &args, MAX_WIDTH),
+                ResourceType::Drive(rt) => rt.render_page(frame, &args, MAX_WIDTH),
+                ResourceType::Network(rt) => rt.render_page(frame, &args, MAX_WIDTH),
+                ResourceType::Battery(rt) => rt.render_page(frame, &args, MAX_WIDTH),
+                ResourceType::Process(rt) => rt.render_page(frame, &args, MAX_WIDTH),
             };
         }
     }
@@ -292,7 +309,7 @@ impl ResourceType {
             SensorRsp::CPU(data) => {
                 if let ResourceType::CPU(rt) = self {
                     if rsp_id == rt.get_id() {
-                        rt.update_data(&data);
+                        rt.update_data(data);
                         return true;
                     }
                 }
@@ -300,7 +317,7 @@ impl ResourceType {
             SensorRsp::Memory(data) => {
                 if let ResourceType::Memory(rt) = self {
                     if rsp_id == rt.get_id() {
-                        rt.update_data(&data);
+                        rt.update_data(data);
                         return true;
                     }
                 }
@@ -310,7 +327,7 @@ impl ResourceType {
                     match data {
                         Ok(data) => {
                             if rsp_id == rt.get_id() {
-                                rt.update_data(&data);
+                                rt.update_data(data);
                                 return true;
                             }
                         }
@@ -359,7 +376,7 @@ fn map_all_unique<V, F>(vs: impl Iterator<Item = V>, f: F) -> Vec<String>
 where
     F: Fn(V) -> String,
 {
-    vs.map(|v| f(v)).unique().collect()
+    vs.map(f).unique().collect()
 }
 
 pub struct HardwareWorker {
@@ -374,23 +391,20 @@ impl HardwareWorker {
         thread::Builder::new()
             .name("sensorworker".to_owned())
             .spawn(move || loop {
-                match rx.recv() {
-                    Ok(req) => {
-                        let rsp = match req {
-                            SensorReq::CPU(req) => ResCPU::do_sensor(req),
-                            SensorReq::Memory(req) => ResMEM::do_sensor(req),
-                            SensorReq::GPU(req) => ResGPU::do_sensor(req),
-                            SensorReq::Drive(req) => ResDrive::do_sensor(req),
-                            SensorReq::Network(req) => ResNetwork::do_sensor(req),
-                            SensorReq::Battery(req) => ResBattery::do_sensor(req),
-                            SensorReq::Process(req) => ResProcess::do_sensor(req),
-                        };
+                if let Ok(req) = rx.recv() {
+                    let rsp = match req {
+                        SensorReq::CPU(req) => ResCPU::do_sensor(req),
+                        SensorReq::Memory(req) => ResMEM::do_sensor(req),
+                        SensorReq::GPU(req) => ResGPU::do_sensor(req),
+                        SensorReq::Drive(req) => ResDrive::do_sensor(req),
+                        SensorReq::Network(req) => ResNetwork::do_sensor(req),
+                        SensorReq::Battery(req) => ResBattery::do_sensor(req),
+                        SensorReq::Process(req) => ResProcess::do_sensor(req),
+                    };
 
-                        if let Ok(SensorResultType::SyncResult(rsp)) = rsp {
-                            let _ = result_tx.send(ResourceEvent::SensorRsp(rsp));
-                        }
+                    if let Ok(SensorResultType::SyncResult(rsp)) = rsp {
+                        let _ = result_tx.send(ResourceEvent::SensorRsp(rsp));
                     }
-                    Err(_) => {}
                 }
             })
             .unwrap();

@@ -81,6 +81,12 @@ impl<'a> DerefMut for StatefulColumn<'a> {
     }
 }
 
+impl<'a> Default for StatefulColumn<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> StatefulColumn<'a> {
     pub fn new() -> Self {
         Self {
@@ -258,7 +264,7 @@ impl<'a> StatefulGroupedLines<'a> {
                     end_y.replace(show_end.saturating_sub(range.start) as u16);
                 };
 
-                let focused = self.focused_index().map_or(false, |sel| range.index == sel);
+                let focused = self.focused_index() == Some(range.index);
                 let block = block
                     .clone()
                     .start(start_y)

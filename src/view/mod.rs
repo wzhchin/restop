@@ -1,3 +1,4 @@
+pub mod blocks;
 pub mod sidebar_and_page;
 pub mod theme;
 
