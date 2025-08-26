@@ -2,8 +2,8 @@ use std::{collections::BTreeMap, io::BufRead};
 
 use anyhow::{Context, Result};
 use append_only_vec::AppendOnlyVec;
-use once_cell::sync::Lazy;
 use log::error;
+use once_cell::sync::Lazy;
 
 static DEVICES: Lazy<AppendOnlyVec<Device>> = Lazy::new(AppendOnlyVec::new);
 

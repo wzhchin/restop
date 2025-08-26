@@ -1,4 +1,3 @@
-
 use super::settings::{Base, TemperatureUnit, SETTINGS};
 
 #[repr(u8)]

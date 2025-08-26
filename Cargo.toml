@@ -8,7 +8,7 @@ edition = "2021"
 opt-level = 1
 
 [profile.release]
-lto = "fat" 
+lto = "fat"
 debug = true
 incremental = true
 
@@ -37,8 +37,6 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 itertools = "0.14.0"
 flume = { version = "0.11.0", default-features = false, features = ["async"] }
 ratatui = { version = "0.29.0", features = [] }
-tracing-subscriber = "0.3.19"
 append-only-vec = "0.1.4"
-rust-ini = "0.21.1"
 libc = "0.2.155"
 unicode-width = "0.2.0"

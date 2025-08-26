@@ -6,7 +6,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use restop::app::ResTop;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-/*     #[cfg(debug_assertions)]
+    /*     #[cfg(debug_assertions)]
     let file_appender = tracing_appender::rolling::daily("/tmp/", "resource-tui.log");
     #[cfg(debug_assertions)]
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);

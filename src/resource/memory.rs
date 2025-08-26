@@ -81,7 +81,9 @@ impl Resource for ResMEM {
     fn do_sensor(req: Self::Req) -> AResult<SensorResultType> {
         let data = MemoryData::fetch(req)?;
 
-        Ok(SensorResultType::SyncResult(super::SensorRsp::Memory(data).into()))
+        Ok(SensorResultType::SyncResult(
+            super::SensorRsp::Memory(data).into(),
+        ))
     }
 
     fn update_data(&mut self, data: &Self::Rsp) {
