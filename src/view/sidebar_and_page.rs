@@ -9,7 +9,7 @@ use ratatui::{
 
 use crate::{component::stateful_lines::StatefulGroupedLines, resource::ResourceType};
 
-use super::{Navigator, NavigatorArgs, OverviewArg, PageArg};
+use super::{Navigator, NavigatorArgs, BlockArg, DetailArg};
 
 #[derive(Debug, Default)]
 pub struct SidebarAndPage {
@@ -57,13 +57,13 @@ impl SidebarAndPage {
             ..rect
         };
 
-        let mut args = OverviewArg {
+        let mut args = BlockArg {
             width: rect.width,
             focused: !self.page_focused,
         };
         let mut overviews = vec![];
         for ele in resources.iter() {
-            if let Ok(ov) = ele.overview_content(&mut args) {
+            if let Ok(ov) = ele.block(&mut args) {
                 overviews.push(ov)
             }
         }
@@ -147,11 +147,11 @@ impl Navigator for SidebarAndPage {
             .or(Some(0))
             .and_then(|id| resources.get_mut(id))
         {
-            let mut args = PageArg {
+            let mut args = DetailArg {
                 rect: self.page,
                 active: self.page_focused,
             };
-            rt.render_page(frame, &mut args);
+            rt.render_detail(frame, &mut args);
         }
     }
 

@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
+use process_data::ReuseReader;
 
 use crate::tarits::{None2NaN, None2NanString};
 
@@ -152,19 +153,20 @@ pub struct Battery {
 }
 
 impl Battery {
-    pub fn get_sysfs_paths() -> Result<Vec<PathBuf>> {
+    pub fn get_sysfs_paths(reader: &mut ReuseReader) -> Result<Vec<PathBuf>> {
         let mut list = Vec::new();
         let entries = std::fs::read_dir("/sys/class/power_supply")?;
         for entry in entries {
             let entry = entry?;
-            if std::fs::read_to_string(entry.path().join("type"))
-                .unwrap_or_default()
-                .to_ascii_lowercase()
-                .trim()
-                != "battery"
+            if reader
+                .read(entry.path().join("type"), |e| {
+                    Ok(e.eq_ignore_ascii_case("battery"))
+                })
+                .unwrap_or(false)
             {
                 continue;
             }
+
             list.push(entry.path());
         }
         Ok(list)

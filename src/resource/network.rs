@@ -17,7 +17,7 @@ use crate::{
     },
     tarits::{None2NaN, None2NaNDef, None2NanString},
     view::theme::SharedTheme,
-    view::{OverviewArg, PageArg},
+    view::{BlockArg, DetailArg},
 };
 
 use super::{Resource, SensorResultType, SensorRsp};
@@ -161,7 +161,7 @@ impl Resource for ResNetwork {
         self.old_sent_bytes = sent_bytes.as_ref().map(|e| *e).ok();
     }
 
-    fn overview_content(&self, args: &mut OverviewArg) -> AResult<GroupedLines<'static>> {
+    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
         let width = args.width;
         let block = GroupedLines::builder(width, &self.theme)
             .multi_kv_single_line(vec![
@@ -204,7 +204,7 @@ impl Resource for ResNetwork {
         Ok(block)
     }
 
-    fn _build_page(&mut self, args: &PageArg) -> AResult<String> {
+    fn _build_page(&mut self, args: &DetailArg) -> AResult<String> {
         let mut blocks = vec![];
         let Rect {
             width,

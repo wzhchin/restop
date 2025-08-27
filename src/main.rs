@@ -1,18 +1,22 @@
+use std::fs::File;
+
 use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use log::LevelFilter;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use restop::app::ResTop;
+use simplelog::{CombinedLogger, Config, WriteLogger};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /*     #[cfg(debug_assertions)]
-    let file_appender = tracing_appender::rolling::daily("/tmp/", "resource-tui.log");
     #[cfg(debug_assertions)]
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    #[cfg(debug_assertions)]
-    tracing_subscriber::fmt().with_writer(non_blocking).init(); */
-
+    CombinedLogger::init(vec![WriteLogger::new(
+        LevelFilter::Debug,
+        Config::default(),
+        File::create("/tmp/restop.log").unwrap(),
+    )])
+    .unwrap();
     let backend = CrosstermBackend::new(std::io::stdout());
     let mut term = Terminal::new(backend)?;
 

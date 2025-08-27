@@ -11,7 +11,7 @@ use flume::{Receiver, Sender};
 
 use itertools::Itertools;
 use once_cell::sync::Lazy;
-use process_data::ProcessData;
+use process_data::{ProcessData, ReuseReader};
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style, Stylize},
@@ -35,7 +35,7 @@ use crate::{
     },
     tarits::{None2NaN, None2NanString},
     utils::{is_alt_char, is_char_and_mod, is_esc},
-    view::{theme::SharedTheme, NavigatorEvent, OverviewArg, PageArg},
+    view::{theme::SharedTheme, NavigatorEvent, BlockArg, DetailArg},
 };
 
 use super::{Resource, SensorResultType};
@@ -114,7 +114,7 @@ impl Resource for ResProcess {
 
     fn get_req(&self) -> Self::Req {}
 
-    fn overview_content(&self, args: &mut OverviewArg) -> AResult<GroupedLines<'static>> {
+    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
         let width = args.width;
         let block = GroupedLines::builder(width, &self.theme)
             .kv("Uptime", convert_seconds(self.uptime.get()))
@@ -137,7 +137,7 @@ impl Resource for ResProcess {
         Ok(block)
     }
 
-    fn _build_page(&mut self, args: &PageArg) -> AResult<String> {
+    fn _build_page(&mut self, args: &DetailArg) -> AResult<String> {
         self.view_state.set_header(self.line_builder.to_header());
         self.view_state.update_view_height(args.rect.height);
         if let Some(data) = self.data.as_ref() {
@@ -225,7 +225,7 @@ impl Resource for ResProcess {
         "".to_string()
     }
 
-    fn render_page(&mut self, frame: &mut ratatui::Frame, args: &PageArg, _max_width: u16) {
+    fn render_detail(&mut self, frame: &mut ratatui::Frame, args: &DetailArg, _max_width: u16) {
         let inner = Rect {
             x: args.rect.x.saturating_add(1),
             y: args.rect.y.saturating_add(1),
@@ -485,6 +485,7 @@ pub enum ProcessMsg {
 pub struct Process {}
 
 pub struct ProcessWorker {
+    reader: ReuseReader,
     app_context: AppsContext,
     filter: Option<String>,
 }
@@ -494,6 +495,7 @@ impl ProcessWorker {
         let mut worker = ProcessWorker {
             app_context: AppsContext::new(),
             filter: None,
+            reader: ReuseReader::new(),
         };
 
         let req_rx = PROCESS_WORKER_CHANNEL.1.clone();
@@ -552,7 +554,7 @@ impl ProcessWorker {
     }
 
     pub fn updata_data(&mut self) {
-        match ProcessData::all_process_data() {
+        match ProcessData::all_process_data(&mut self.reader) {
             Ok(data) => {
                 self.app_context.refresh(data);
             }

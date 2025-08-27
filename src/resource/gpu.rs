@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use chin_tools::AResult;
+use chin_tools::{AResult, SharedStr};
 
 use crate::{
     component::{
@@ -14,7 +14,7 @@ use crate::{
         units::convert_power,
     },
     tarits::{None2NaN, None2NaNDef, None2NanString},
-    view::{theme::SharedTheme, OverviewArg, PageArg},
+    view::{theme::SharedTheme, BlockArg, DetailArg},
 };
 
 use super::{Resource, SensorResultType, SensorRsp};
@@ -29,8 +29,17 @@ pub struct ResGPU {
 
     gpu_data: Option<GpuData>,
 
-    total_usage: Option<f64>,
-    history: Ring<f64>,
+    total_usage_history: Ring<f64>,
+
+    video_decode_utilzation_history: Ring<f64>,
+    video_encode_utilzation_history: Ring<f64>,
+
+    max_clock_speed: Option<usize>,
+
+    opengl_version: SharedStr,
+    vulkan_version: SharedStr,
+    pci_express_speed: SharedStr,
+    max_pci_express_speed: SharedStr,
 
     viewer_state: StatefulGroupedLines<'static>,
 }
@@ -45,12 +54,18 @@ impl ResGPU {
                 let id = e.pci_slot().to_string();
                 Self {
                     id,
-                    total_usage: None,
                     theme: theme.clone(),
                     info: Arc::new(e),
-                    history: Ring::new(1000),
+                    total_usage_history: Ring::new(1000),
                     gpu_data: None,
                     viewer_state: StatefulGroupedLines::default(),
+                    max_clock_speed: None,
+                    opengl_version: "".into(),
+                    vulkan_version: "".into(),
+                    pci_express_speed: "".into(),
+                    max_pci_express_speed: "".into(),
+                    video_decode_utilzation_history: Ring::new(1000),
+                    video_encode_utilzation_history: Ring::new(1000),
                 }
             })
             .collect())
@@ -76,35 +91,52 @@ impl Resource for ResGPU {
     }
 
     fn update_data(&mut self, data: &Self::Rsp) {
-        let uf = data.usage_fraction;
-
-        self.history.insert_at_first(uf);
-        self.total_usage.replace(uf);
+        log::info!("update gpu data");
+        if let Some(val) = data.usage_fraction {
+            self.total_usage_history.insert_at_first(val);
+        }
+        if let Some(val) = data.decode_fraction {
+            self.video_decode_utilzation_history.insert_at_first(val);
+        }
+        if let Some(val) = data.encode_fraction {
+            self.video_encode_utilzation_history.insert_at_first(val);
+        }
 
         self.gpu_data.replace(data.clone());
     }
 
-    fn overview_content(&self, args: &mut OverviewArg) -> AResult<GroupedLines<'static>> {
+    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
         let width = args.width;
-        let block = GroupedLines::builder(width, &self.theme)
-            .kv("UR", self.total_usage.or_nan(|e| format!("{:.1} %", e)))
-            .lines(ls_history_graph(
-                width,
-                &self.history,
-                1.,
-                0.,
-                3,
-                ratatui::style::Color::Red,
-            ))
-            .active(args.focused)
-            .build(format!(
-                "GPU({})",
-                self.info
-                    .sysfs_path()
-                    .file_name()
-                    .map(|e| e.to_str().or_nan_owned())
-                    .or_unk_def()
-            ))?;
+        let title = format!(
+            "GPU({})",
+            self.info
+                .sysfs_path()
+                .file_name()
+                .map(|e| e.to_str().or_nan_owned())
+                .or_unk_def()
+        );
+        let block = if let Some(gpu_data) = self.gpu_data.as_ref() {
+            GroupedLines::builder(width, &self.theme)
+                .kv(
+                    "UR",
+                    gpu_data
+                        .usage_fraction
+                        .map(|v| format!("{:.1} %", v))
+                        .or_nan_def(),
+                )
+                .lines(ls_history_graph(
+                    width,
+                    &self.total_usage_history,
+                    1.,
+                    0.,
+                    3,
+                    ratatui::style::Color::Red,
+                ))
+                .active(args.focused)
+                .build(title)?
+        } else {
+            GroupedLines::builder(width, &self.theme).build(title)?
+        };
 
         Ok(block)
     }
@@ -121,11 +153,71 @@ impl Resource for ResGPU {
         "GPU".to_string()
     }
 
-    fn _build_page(&mut self, args: &PageArg) -> AResult<String> {
+    fn _build_page(&mut self, args: &DetailArg) -> AResult<String> {
         let width = args.rect.width;
         let mut blocks = vec![];
 
-        let usage = GroupedLines::builder(width, &self.theme)
+        if let Some(gpu_data) = self.gpu_data.as_ref() {
+            let usage = GroupedLines::builder(width, &self.theme)
+                .kv(
+                    "Utilization",
+                    gpu_data
+                        .usage_fraction
+                        .or_nan(|e| format!("{:.1} %", e * 100.)),
+                )
+                .lines(ls_history_graph(
+                    width - 2,
+                    &self.total_usage_history,
+                    100.,
+                    0.,
+                    3,
+                    ratatui::style::Color::Green,
+                ))
+                .empty_sep()
+                .kv("Clock Speed", {
+                    if let (None, None) = (gpu_data.clock_speed, self.max_clock_speed) {
+                        gpu_data.clock_speed.or_nan_owned()
+                    } else {
+                        format!(
+                            "{} / {}",
+                            gpu_data.clock_speed.or_nan_owned(),
+                            self.max_clock_speed.or_nan_owned()
+                        )
+                    }
+                })
+                .kv_sep(
+                    "VRam Used / Total / Speed",
+                    format!(
+                        "{} / {} /{}",
+                        gpu_data.used_vram.or_nan_owned(),
+                        gpu_data.total_vram.or_nan_owned(),
+                        gpu_data.vram_speed.or_nan_owned()
+                    ),
+                )
+                .kv("Decode Utilzation", gpu_data.decode_fraction.or_nan_owned())
+                .lines(ls_history_graph(
+                    width - 2,
+                    &self.video_decode_utilzation_history,
+                    100.,
+                    0.,
+                    3,
+                    ratatui::style::Color::Green,
+                ))
+                .kv("Encode Utilzation", gpu_data.encode_fraction.or_nan_owned())
+                .lines(ls_history_graph(
+                    width - 2,
+                    &self.video_encode_utilzation_history,
+                    100.,
+                    0.,
+                    3,
+                    ratatui::style::Color::Green,
+                ))
+                .active(args.active)
+                .build("Usage")?;
+            blocks.push(usage);
+        }
+
+        let props = GroupedLines::builder(width, &self.theme)
             .kv_sep(
                 "Manufacturer",
                 self.info.get_vendor_name().ok().or_unk_def(),
@@ -136,9 +228,12 @@ impl Resource for ResGPU {
                 "Max Power Cap",
                 self.info.power_cap_max().ok().or_nan(|e| convert_power(*e)),
             )
+            .kv("OpenGL Version", self.opengl_version.as_str())
+            .kv("Vulkan Version", self.vulkan_version.as_str())
+            .kv("PCI Express Speed", self.pci_express_speed.as_str())
             .active(args.active)
-            .build("Usage")?;
-        blocks.push(usage);
+            .build("Props")?;
+        blocks.push(props);
 
         self.viewer_state.update_blocks(blocks);
 

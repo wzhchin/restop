@@ -30,22 +30,22 @@ pub const VID_NVIDIA: u16 = 4318;
 pub struct GpuData {
     pub id: String,
     pub pci_slot: PciSlot,
-    pub usage_fraction: f64,
+    pub usage_fraction: Option<f64>,
 
-    pub encode_fraction: f64,
-    pub decode_fraction: f64,
+    pub encode_fraction: Option<f64>,
+    pub decode_fraction: Option<f64>,
 
-    pub total_vram: isize,
-    pub used_vram: isize,
+    pub total_vram: Option<isize>,
+    pub used_vram: Option<isize>,
 
-    pub clock_speed: f64,
-    pub vram_speed: f64,
+    pub clock_speed: Option<f64>,
+    pub vram_speed: Option<f64>,
 
-    pub temp: f64,
+    pub temp: Option<f64>,
 
-    pub power_usage: f64,
-    pub power_cap: f64,
-    pub power_cap_max: f64,
+    pub power_usage: Option<f64>,
+    pub power_cap: Option<f64>,
+    pub power_cap_max: Option<f64>,
 
     pub nvidia: bool,
 }
@@ -54,23 +54,23 @@ impl GpuData {
     pub fn new(gpu: &Gpu) -> AResult<Self> {
         let pci_slot = gpu.pci_slot();
 
-        let usage_fraction = gpu.usage().map(|usage| (usage as f64) / 100.0)?;
+        let usage_fraction = gpu.usage().map(|usage| (usage as f64) / 100.0).ok();
 
-        let encode_fraction = gpu.encode_usage().map(|usage| (usage as f64) / 100.0)?;
+        let encode_fraction = gpu.encode_usage().map(|usage| (usage as f64) / 100.0).ok();
 
-        let decode_fraction = gpu.decode_usage().map(|usage| (usage as f64) / 100.0)?;
+        let decode_fraction = gpu.decode_usage().map(|usage| (usage as f64) / 100.0).ok();
 
-        let total_vram = gpu.total_vram()?;
-        let used_vram = gpu.used_vram()?;
+        let total_vram = gpu.total_vram().ok();
+        let used_vram = gpu.used_vram().ok();
 
-        let clock_speed = gpu.core_frequency()?;
-        let vram_speed = gpu.vram_frequency()?;
+        let clock_speed = gpu.core_frequency().ok();
+        let vram_speed = gpu.vram_frequency().ok();
 
-        let temp = gpu.temperature()?;
+        let temp = gpu.temperature().ok();
 
-        let power_usage = gpu.power_usage()?;
-        let power_cap = gpu.power_cap()?;
-        let power_cap_max = gpu.power_cap_max()?;
+        let power_usage = gpu.power_usage().ok();
+        let power_cap = gpu.power_cap().ok();
+        let power_cap_max = gpu.power_cap_max().ok();
 
         let nvidia = matches!(gpu, Gpu::Nvidia(_));
 
@@ -137,6 +137,7 @@ pub trait GpuImpl {
 
     fn read_device_file<P: AsRef<Path> + std::marker::Send>(&self, file: P) -> Result<String> {
         let path = self.sysfs_path().join("device").join(file);
+        log::debug!("{:?}", path);
         Ok(std::fs::read_to_string(path)?.replace('\n', ""))
     }
 

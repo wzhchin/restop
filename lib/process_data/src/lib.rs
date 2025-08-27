@@ -181,17 +181,18 @@ impl ProcessData {
         }
     }
 
-    fn get_uid(proc_path: &Path) -> Result<u32> {
-        let status = std::fs::read_to_string(proc_path.join("status"))?;
-        if let Some(captures) = RE_UID.captures(&status) {
-            let first_num_str = captures.get(1).context("no uid found")?;
-            first_num_str
-                .as_str()
-                .parse::<u32>()
-                .context("couldn't parse uid in /status")
-        } else {
-            Ok(0)
-        }
+    fn get_uid(reader: &mut ReuseReader, proc_path: &Path) -> Result<u32> {
+        reader.read(proc_path.join("status"), |s| {
+            if let Some(captures) = RE_UID.captures(&s) {
+                let first_num_str = captures.get(1).context("no uid found")?;
+                first_num_str
+                    .as_str()
+                    .parse::<u32>()
+                    .context("couldn't parse uid in /status")
+            } else {
+                Ok(0)
+            }
+        })
     }
 
     pub fn update_nvidia_stats() {
@@ -207,12 +208,12 @@ impl ProcessData {
         }
     }
 
-    pub fn all_process_data() -> Result<Vec<Self>> {
+    pub fn all_process_data(reader: &mut ReuseReader) -> Result<Vec<Self>> {
         Self::update_nvidia_stats();
 
-        let mut process_data = vec![];
+        let mut process_data = Vec::with_capacity(256);
         for entry in glob("/proc/[0-9]*/").context("unable to glob")?.flatten() {
-            let data = ProcessData::try_from_path(entry);
+            let data = ProcessData::try_from_path(reader, entry);
 
             if let Ok(data) = data {
                 process_data.push(data)
@@ -222,13 +223,61 @@ impl ProcessData {
         Ok(process_data)
     }
 
-    pub fn try_from_path(proc_path: PathBuf) -> Result<Self> {
-        let stat = std::fs::read_to_string(proc_path.join("stat"))?;
-        let statm = std::fs::read_to_string(proc_path.join("statm"))?;
-        let comm = std::fs::read_to_string(proc_path.join("comm"))?;
-        let commandline = std::fs::read_to_string(proc_path.join("cmdline"))?;
-        let cgroup = std::fs::read_to_string(proc_path.join("cgroup"))?;
-        let io = std::fs::read_to_string(proc_path.join("io")).ok();
+    pub fn try_from_path(reader: &mut ReuseReader, proc_path: PathBuf) -> Result<Self> {
+        let stat = reader.read(proc_path.join("stat"), |stat| {
+            let stat = stat
+                .split(')') // since we don't care about the pid or the executable name, split after the executable name to make our life easier
+                .last()
+                .context("stat doesn't have ')'")?
+                .split(' ')
+                .skip(1) // the first element would be a space, let's ignore that
+                .collect::<Vec<_>>();
+
+            // -2 to accommodate for only collecting after the second item (which is the executable name as mentioned above)
+            let user_cpu_time = stat[13 - 2].parse::<u64>()?;
+            let system_cpu_time = stat[14 - 2].parse::<u64>()?;
+            let starttime = stat[21 - 2].parse()?;
+
+            Ok([user_cpu_time, system_cpu_time, starttime])
+        })?;
+
+        let memory_usage = reader.read(proc_path.join("statm"), |statm| {
+            let mut statm = statm.split(' ');
+            statm.next();
+            let f1 = statm
+                .next()
+                .context("unanble to get field 1")?
+                .parse::<usize>()?;
+            let f2 = statm
+                .next()
+                .context("unanble to get field 2")?
+                .parse::<usize>()?;
+
+            Ok((f1 - f2) * *PAGESIZE)
+        })?;
+
+        let comm = reader.read(proc_path.join("comm"), |e| Ok(e.replace('\n', "")))?;
+
+        let cmdline = reader.read_to_str(proc_path.join("cmdline"))?;
+
+        let cgroup = reader.read(proc_path.join("cgroup"), |c| {
+            let cgroup: Option<String> = Self::sanitize_cgroup(c);
+            Ok(cgroup)
+        })?;
+
+        let io_read_write = reader.read_to_opt(proc_path.join("io"), |io| {
+            let read_bytes = RE_IO_READ
+                .captures(io)
+                .and_then(|captures| captures.get(1))
+                .and_then(|capture| capture.as_str().parse::<u64>().ok());
+
+            let write_bytes = RE_IO_WRITE
+                .captures(io)
+                .and_then(|captures| captures.get(1))
+                .and_then(|capture| capture.as_str().parse::<u64>().ok());
+
+            Some([read_bytes, write_bytes])
+        });
 
         let pid = proc_path
             .file_name()
@@ -238,55 +287,19 @@ impl ProcessData {
             .parse()?;
 
         let user = USERS_CACHE
-            .get(&Self::get_uid(&proc_path)?)
+            .get(&Self::get_uid(reader, &proc_path)?)
             .cloned()
             .unwrap_or(String::from("root"));
 
-        let stat = stat
-            .split(')') // since we don't care about the pid or the executable name, split after the executable name to make our life easier
-            .last()
-            .context("stat doesn't have ')'")?
-            .split(' ')
-            .skip(1) // the first element would be a space, let's ignore that
-            .collect::<Vec<_>>();
-
-        let statm = statm.split(' ').collect::<Vec<_>>();
-
-        let comm = comm.replace('\n', "");
-
-        // -2 to accommodate for only collecting after the second item (which is the executable name as mentioned above)
-        let user_cpu_time = stat[13 - 2].parse::<u64>()?;
-        let system_cpu_time = stat[14 - 2].parse::<u64>()?;
-
         let cpu_time_timestamp = unix_as_millis();
-
-        let memory_usage = (statm[1].parse::<usize>()? - statm[2].parse::<usize>()?) * *PAGESIZE;
-
-        let starttime = stat[21 - 2].parse()?;
-
-        let cgroup = Self::sanitize_cgroup(cgroup);
 
         let containerization = match &proc_path.join("root").join(".flatpak-info").exists() {
             true => Containerization::Flatpak,
-            false => match commandline.starts_with("/snap/") {
+            false => match cmdline.starts_with("/snap/") {
                 true => Containerization::Snap,
                 false => Containerization::None,
             },
         };
-
-        let read_bytes = io.as_ref().and_then(|io| {
-            RE_IO_READ
-                .captures(io)
-                .and_then(|captures| captures.get(1))
-                .and_then(|capture| capture.as_str().parse::<u64>().ok())
-        });
-
-        let write_bytes = io.as_ref().and_then(|io| {
-            RE_IO_WRITE
-                .captures(io)
-                .and_then(|captures| captures.get(1))
-                .and_then(|capture| capture.as_str().parse::<u64>().ok())
-        });
 
         let gpu_usage_stats = Self::gpu_usage_stats(&proc_path, pid);
 
@@ -296,27 +309,28 @@ impl ProcessData {
             pid,
             user,
             comm,
-            commandline,
-            user_cpu_time,
-            system_cpu_time,
+            commandline: cmdline,
+            user_cpu_time: stat[0],
+            system_cpu_time: stat[1],
             cpu_time_timestamp,
             memory_usage,
-            starttime,
+            starttime: stat[2],
             cgroup,
             proc_path,
             containerization,
-            read_bytes,
-            write_bytes,
+            read_bytes: io_read_write.and_then(|e| e[0]),
+            write_bytes: io_read_write.and_then(|e| e[1]),
             timestamp,
             gpu_usage_stats,
         })
     }
 
     fn gpu_usage_stats(proc_path: &PathBuf, pid: i32) -> BTreeMap<PciSlot, GpuUsageStats> {
-        let nvidia_stats = Self::nvidia_gpu_stats_all(pid).unwrap_or_default();
+        /*         let nvidia_stats = Self::nvidia_gpu_stats_all(pid).unwrap_or_default();
         let mut other_stats = Self::other_gpu_usage_stats(proc_path, pid).unwrap_or_default();
         other_stats.extend(nvidia_stats);
-        other_stats
+        other_stats */
+        BTreeMap::new()
     }
 
     fn other_gpu_usage_stats(
@@ -364,7 +378,7 @@ impl ProcessData {
             let fd_path = fdinfo_path.to_str().map(|s| s.replace("fdinfo", "fd"));
             if let Some(fd_path) = fd_path {
                 if let Ok(fd_metadata) = std::fs::metadata(fd_path) {
-                    let major = libc::major(fd_metadata.st_rdev()) ;
+                    let major = libc::major(fd_metadata.st_rdev());
                     if (fd_metadata.st_mode() & libc::S_IFMT) != libc::S_IFCHR || major != 226 {
                         continue;
                     }
@@ -573,4 +587,53 @@ pub fn unix_as_millis() -> u64 {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64
+}
+
+pub struct ReuseReader {
+    buffer: String,
+}
+
+impl ReuseReader {
+    pub fn new() -> ReuseReader {
+        ReuseReader {
+            buffer: String::new(),
+        }
+    }
+
+    #[inline]
+    pub fn read<P: AsRef<Path>, T, F: FnOnce(&str) -> anyhow::Result<T>>(
+        &mut self,
+        filepath: P,
+        mapper: F,
+    ) -> anyhow::Result<T> {
+        self.buffer.clear();
+        let mut file = File::open(filepath.as_ref())?;
+        file.read_to_string(&mut self.buffer)?;
+        mapper(&self.buffer)
+    }
+
+    #[inline]
+    pub fn read_to_opt<P: AsRef<Path>, T, F: FnOnce(&str) -> Option<T>>(
+        &mut self,
+        filepath: P,
+        mapper: F,
+    ) -> Option<T> {
+        self.buffer.clear();
+        let file = File::open(filepath.as_ref()).ok();
+        match file {
+            Some(mut file) => {
+                file.read_to_string(&mut self.buffer).ok();
+                mapper(&self.buffer)
+            }
+            None => None,
+        }
+    }
+
+    #[inline]
+    pub fn read_to_str<P: AsRef<Path>>(&mut self, filepath: P) -> anyhow::Result<String> {
+        self.buffer.clear();
+        let mut file = File::open(filepath.as_ref())?;
+        file.read_to_string(&mut self.buffer)?;
+        Ok(self.buffer.to_string())
+    }
 }

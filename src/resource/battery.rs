@@ -1,6 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use chin_tools::AResult;
+use process_data::ReuseReader;
 use ratatui::layout::Rect;
 
 use crate::{
@@ -16,7 +17,7 @@ use crate::{
     },
     tarits::{None2NaN, None2NaNDef},
     view::theme::SharedTheme,
-    view::{OverviewArg, PageArg},
+    view::{BlockArg, DetailArg},
 };
 
 use super::{Resource, SensorResultType, SensorRsp};
@@ -32,7 +33,7 @@ pub struct ResBattery {
 
 impl ResBattery {
     pub fn new(theme: SharedTheme) -> AResult<Vec<Self>> {
-        let paths = Battery::get_sysfs_paths()?;
+        let paths = Battery::get_sysfs_paths(&mut ReuseReader::new())?;
         let bs = paths
             .into_iter()
             .map(|path| ResBattery {
@@ -72,7 +73,7 @@ impl Resource for ResBattery {
         self.path.clone()
     }
 
-    fn overview_content(&self, args: &mut OverviewArg) -> AResult<GroupedLines<'static>> {
+    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
         let width = args.width;
         let block = GroupedLines::builder(width, &self.theme)
             .line(
@@ -92,7 +93,7 @@ impl Resource for ResBattery {
         Ok(block)
     }
 
-    fn _build_page(&mut self, args: &PageArg) -> AResult<String> {
+    fn _build_page(&mut self, args: &DetailArg) -> AResult<String> {
         let Rect {
             width,
             height: _,

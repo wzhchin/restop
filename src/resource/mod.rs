@@ -39,7 +39,7 @@ use crate::{
         memory::MemoryData,
         network::{NetworkData, NetworkInterface},
     },
-    view::{NavigatorEvent, OverviewArg, PageArg},
+    view::{NavigatorEvent, BlockArg, DetailArg},
 };
 
 pub trait Resource {
@@ -58,9 +58,9 @@ pub trait Resource {
 
     fn update_data(&mut self, data: &Self::Rsp);
 
-    fn overview_content(&self, args: &mut OverviewArg) -> AResult<GroupedLines<'static>>;
+    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>>;
 
-    fn _build_page(&mut self, _args: &PageArg) -> AResult<String> {
+    fn _build_page(&mut self, _args: &DetailArg) -> AResult<String> {
         Ok("Not Supported".to_string())
     }
 
@@ -70,7 +70,7 @@ pub trait Resource {
         false
     }
 
-    fn render_page(&mut self, frame: &mut Frame, args: &PageArg, max_width: u16) {
+    fn render_detail(&mut self, frame: &mut Frame, args: &DetailArg, max_width: u16) {
         let rect = if max_width > 0 && args.rect.width > max_width {
             let side = (args.rect.width - max_width) / 2;
             Rect {
@@ -82,7 +82,7 @@ pub trait Resource {
             args.rect
         };
 
-        let args = PageArg {
+        let args = DetailArg {
             rect,
             ..args.clone()
         };
@@ -237,19 +237,19 @@ impl ResourceType {
         }
     }
 
-    pub fn overview_content(&self, args: &mut OverviewArg) -> AResult<GroupedLines<'static>> {
+    pub fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
         match self {
-            ResourceType::CPU(rt) => rt.overview_content(args),
-            ResourceType::Memory(rt) => rt.overview_content(args),
-            ResourceType::GPU(rt) => rt.overview_content(args),
-            ResourceType::Drive(rt) => rt.overview_content(args),
-            ResourceType::Network(rt) => rt.overview_content(args),
-            ResourceType::Battery(rt) => rt.overview_content(args),
-            ResourceType::Process(rt) => rt.overview_content(args),
+            ResourceType::CPU(rt) => rt.block(args),
+            ResourceType::Memory(rt) => rt.block(args),
+            ResourceType::GPU(rt) => rt.block(args),
+            ResourceType::Drive(rt) => rt.block(args),
+            ResourceType::Network(rt) => rt.block(args),
+            ResourceType::Battery(rt) => rt.block(args),
+            ResourceType::Process(rt) => rt.block(args),
         }
     }
 
-    pub fn render_page(&mut self, frame: &mut Frame, args: &mut PageArg) {
+    pub fn render_detail(&mut self, frame: &mut Frame, args: &mut DetailArg) {
         let rect = args.rect;
         if rect.height >= 1 {
             let header_rect = Rect { height: 1, ..rect };
@@ -280,13 +280,13 @@ impl ResourceType {
             const MAX_WIDTH: u16 = 90;
 
             match self {
-                ResourceType::CPU(rt) => rt.render_page(frame, &args, MAX_WIDTH),
-                ResourceType::Memory(rt) => rt.render_page(frame, &args, MAX_WIDTH),
-                ResourceType::GPU(rt) => rt.render_page(frame, &args, MAX_WIDTH),
-                ResourceType::Drive(rt) => rt.render_page(frame, &args, MAX_WIDTH),
-                ResourceType::Network(rt) => rt.render_page(frame, &args, MAX_WIDTH),
-                ResourceType::Battery(rt) => rt.render_page(frame, &args, MAX_WIDTH),
-                ResourceType::Process(rt) => rt.render_page(frame, &args, MAX_WIDTH),
+                ResourceType::CPU(rt) => rt.render_detail(frame, &args, MAX_WIDTH),
+                ResourceType::Memory(rt) => rt.render_detail(frame, &args, MAX_WIDTH),
+                ResourceType::GPU(rt) => rt.render_detail(frame, &args, MAX_WIDTH),
+                ResourceType::Drive(rt) => rt.render_detail(frame, &args, MAX_WIDTH),
+                ResourceType::Network(rt) => rt.render_detail(frame, &args, MAX_WIDTH),
+                ResourceType::Battery(rt) => rt.render_detail(frame, &args, MAX_WIDTH),
+                ResourceType::Process(rt) => rt.render_detail(frame, &args, MAX_WIDTH),
             };
         }
     }
@@ -332,7 +332,7 @@ impl ResourceType {
                             }
                         }
                         Err(err) => {
-                            log::error!("unable to read GPU data: {}", err);
+                            log::error!("unable to read GPU data: {}, {}", err, err.backtrace());
                         }
                     }
                 }

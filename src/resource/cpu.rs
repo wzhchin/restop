@@ -17,7 +17,7 @@ use crate::{
         units::{convert_frequency, convert_temperature},
     },
     tarits::{NaNDefault, None2NaN, None2NaNDef},
-    view::{theme::SharedTheme, OverviewArg, PageArg},
+    view::{theme::SharedTheme, BlockArg, DetailArg},
 };
 
 use super::{Resource, SensorResultType, SensorRsp};
@@ -132,7 +132,7 @@ impl Resource for ResCPU {
         self.frequences.replace(frequencies.clone());
     }
 
-    fn overview_content(&self, args: &mut OverviewArg) -> AResult<GroupedLines<'static>> {
+    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
         let width = args.width;
         let block = GroupedLines::builder(width, &self.theme)
             .kv(
@@ -159,7 +159,7 @@ impl Resource for ResCPU {
         Ok(block)
     }
 
-    fn _build_page(&mut self, args: &PageArg) -> AResult<String> {
+    fn _build_page(&mut self, args: &DetailArg) -> AResult<String> {
         let width = args.rect.width;
         let mut result = vec![];
         let info = &self.info;

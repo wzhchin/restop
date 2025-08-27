@@ -23,7 +23,7 @@ use crate::{
     },
     tarits::{None2NaN, None2NaNDef, None2NanString},
     view::theme::SharedTheme,
-    view::{OverviewArg, PageArg},
+    view::{BlockArg, DetailArg},
 };
 
 use super::{Resource, SensorResultType, SensorRsp};
@@ -227,7 +227,7 @@ impl Resource for ResDrive {
         }
     }
 
-    fn overview_content(&self, args: &mut OverviewArg) -> AResult<GroupedLines<'static>> {
+    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
         let width = args.width;
         let block = GroupedLines::builder(width, &self.theme)
             .kv("Size", self.info.display_name())
@@ -244,7 +244,7 @@ impl Resource for ResDrive {
         Ok(block)
     }
 
-    fn _build_page(&mut self, args: &PageArg) -> AResult<String> {
+    fn _build_page(&mut self, args: &DetailArg) -> AResult<String> {
         let width = args.rect.width;
         let mut blocks = vec![];
 

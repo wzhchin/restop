@@ -80,13 +80,13 @@ impl Navigator for LayoutType {
     }
 }
 
-pub struct OverviewArg {
+pub struct BlockArg {
     pub width: u16,
     pub focused: bool,
 }
 
 #[derive(Clone)]
-pub struct PageArg {
+pub struct DetailArg {
     pub rect: Rect,
     pub active: bool,
 }

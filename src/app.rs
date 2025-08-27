@@ -138,7 +138,7 @@ impl ResTop {
         let last_sync_ts = Cell::new(SystemTime::UNIX_EPOCH);
         let lasy_draw_ts = Cell::new(SystemTime::UNIX_EPOCH);
 
-        let _: () = loop {
+        loop {
             let now = SystemTime::now();
             let sync_diff = now
                 .duration_since(last_sync_ts.get())
@@ -156,7 +156,7 @@ impl ResTop {
                 || (event_enum.contains(RedrawEventEnum::INTERVAL)
                     && now
                         .duration_since(lasy_draw_ts.get())
-                        .unwrap_or(Duration::from_secs(1))
+                        .unwrap_or(Duration::from_millis(200))
                         > Duration::from_millis(300))
             {
                 lasy_draw_ts.set(now);
@@ -218,7 +218,7 @@ impl ResTop {
                 }
                 _ => {}
             }
-        };
+        }
         Ok(())
     }
 }
