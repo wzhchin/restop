@@ -29,6 +29,12 @@ pub struct ResMEM {
 
     pub usage_history: Ring<f64>,
 
+    pub formatted_used_swap: Option<String>,
+    pub formatted_total_swap: Option<String>,
+    pub swap_usage_percent: Option<f64>,
+
+    pub swap_usage_history: Ring<f64>,
+
     // Show
     theme: SharedTheme,
 
@@ -47,6 +53,10 @@ impl ResMEM {
             formatted_total_mem: Default::default(),
             mem_usage_percent: Default::default(),
             usage_history: Ring::new(1000),
+            formatted_used_swap: Default::default(),
+            formatted_total_swap: Default::default(),
+            swap_usage_percent: Default::default(),
+            swap_usage_history: Ring::new(1000),
             viewer_state: Default::default(),
         })
     }
@@ -61,6 +71,21 @@ impl ResMEM {
         label.push_str(" | ");
 
         if let Some(percent) = self.mem_usage_percent.as_ref() {
+            label.push_str(format!("{:.1} %", percent * 100.).as_str());
+        }
+        label
+    }
+
+    pub fn swap_usage(&self) -> String {
+        let mut label = String::new();
+        match self.formatted_used_swap.as_ref() {
+            Some(v) => label.push_str(v.as_str()),
+            None => label.push_str("NaN"),
+        };
+
+        label.push_str(" | ");
+
+        if let Some(percent) = self.swap_usage_percent.as_ref() {
             label.push_str(format!("{:.1} %", percent * 100.).as_str());
         }
         label
@@ -90,28 +115,48 @@ impl Resource for ResMEM {
         let MemoryData {
             total_mem,
             available_mem,
-            total_swap: _,
-            free_swap: _,
+            total_swap,
+            free_swap,
         } = *data;
 
         let used_mem = total_mem.saturating_sub(available_mem);
-        // let used_swap = total_swap.saturating_sub(free_swap);
+        let used_swap = total_swap.saturating_sub(free_swap);
 
         let memory_fraction = used_mem as f64 / total_mem as f64;
-        // let swap_fraction = (used_swap as f64 / total_swap as f64).nan_default(0.0);
+        let swap_fraction = if total_swap > 0 {
+            used_swap as f64 / total_swap as f64
+        } else {
+            0.0
+        };
 
         let formatted_used_mem = convert_storage(used_mem as f64, false);
         let formatted_total_mem = convert_storage(total_mem as f64, false);
+
+        let formatted_used_swap = if total_swap > 0 {
+            Some(convert_storage(used_swap as f64, false))
+        } else {
+            None
+        };
+        let formatted_total_swap = if total_swap > 0 {
+            Some(convert_storage(total_swap as f64, false))
+        } else {
+            None
+        };
 
         self.mem_usage_percent.replace(memory_fraction);
         self.usage_history.insert_at_first(memory_fraction);
         self.formatted_used_mem.replace(formatted_used_mem);
         self.formatted_total_mem.replace(formatted_total_mem);
+
+        self.swap_usage_percent.replace(swap_fraction);
+        self.swap_usage_history.insert_at_first(swap_fraction);
+        self.formatted_used_swap = formatted_used_swap;
+        self.formatted_total_swap = formatted_total_swap;
     }
 
     fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
         let width = args.width;
-        let block = GroupedLines::builder(width, &self.theme)
+        let mut builder = GroupedLines::builder(width, &self.theme)
             .kv("Dev", {
                 format!(
                     "{}({})",
@@ -119,7 +164,13 @@ impl Resource for ResMEM {
                     self.info.iter().flat_map(|e| &e.r#type).unique().join(" ")
                 )
             })
-            .kv("Usage", self.mem_usage())
+            .kv("Usage", self.mem_usage());
+
+        if self.formatted_total_swap.is_some() && self.formatted_used_swap.is_some() {
+            builder = builder.kv("Swap", self.swap_usage());
+        }
+
+        let block = builder
             .lines(ls_history_graph(
                 width,
                 &self.usage_history,
@@ -147,9 +198,27 @@ impl Resource for ResMEM {
                 0.,
                 3,
                 ratatui::style::Color::Magenta,
-            ))
-            .active(args.active)
-            .build("Usage")?;
+            ));
+
+        let usage = if self.formatted_total_swap.is_some() && self.formatted_used_swap.is_some() {
+            usage
+                .empty_sep()
+                .kv_sep("Swap", self.swap_usage().as_str())
+                .lines(ls_history_graph(
+                    width - 2,
+                    &self.swap_usage_history,
+                    1.,
+                    0.,
+                    3,
+                    ratatui::style::Color::Cyan,
+                ))
+        } else {
+            usage
+        };
+
+        let usage = usage.active(args.active).build("Usage")?;
+
+        block_vec.push(usage);
 
         let props = GroupedLines::builder(width, &self.theme)
             .kv_sep("Slot Usage", self.info.len().to_string().as_str())
@@ -175,7 +244,7 @@ impl Resource for ResMEM {
             })
             .active(args.active)
             .build("Properties")?;
-        block_vec.push(usage);
+
         block_vec.push(props);
 
         self.viewer_state.update_blocks(block_vec);
