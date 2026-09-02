@@ -1,10 +1,11 @@
 use hashbrown::{HashMap, HashSet};
-use process_data::{pci_slot::PciSlot, Containerization, ProcessData};
 
 use crate::tarits::NaNDefault;
 
 use super::{
+    pci::PciSlot,
     process::{Process, ProcessItem},
+    process_data::{Containerization, ProcessData},
     TICK_RATE,
 };
 
@@ -171,13 +172,23 @@ impl AppsContext {
         self.processes.values_mut()
     }
 
-    /// Returns a `HashMap` of running processes. For more info, refer to
-    /// `ProcessItem`.
+    /// Returns running processes as display items.
     pub fn process_items(&self) -> HashMap<i32, ProcessItem> {
-        self.all_processes()
-            .map(|process| (process.data.pid, self.process_item(process.data.pid)))
-            .filter_map(|(pid, process_opt)| process_opt.map(|process| (pid, process)))
+        self.process_items_vec()
+            .into_iter()
+            .map(|item| (item.pid, item))
             .collect()
+    }
+
+    /// Collect process items without the intermediate HashMap (hot path).
+    pub fn process_items_vec(&self) -> Vec<ProcessItem> {
+        let mut items = Vec::with_capacity(self.processes.len());
+        for process in self.all_processes() {
+            if let Some(item) = self.process_item(process.data.pid) {
+                items.push(item);
+            }
+        }
+        items
     }
 
     pub fn process_item(&self, pid: i32) -> Option<ProcessItem> {
@@ -199,6 +210,7 @@ impl AppsContext {
                     .unwrap_or(full_comm),
                 containerization: process.data.containerization,
                 starttime: process.starttime(),
+                starttime_ticks: process.data.starttime,
                 cgroup: process.data.cgroup.clone(),
                 read_speed: process.read_speed(),
                 read_total: process.data.read_bytes,
@@ -220,16 +232,7 @@ impl AppsContext {
             updated_processes.insert(process_data.pid);
             // refresh our old processes
             if let Some(old_process) = self.processes.get_mut(&process_data.pid) {
-                old_process.cpu_time_last = old_process
-                    .data
-                    .user_cpu_time
-                    .saturating_add(old_process.data.system_cpu_time);
-                old_process.timestamp_last = old_process.data.timestamp;
-                old_process.read_bytes_last = old_process.data.read_bytes;
-                old_process.write_bytes_last = old_process.data.write_bytes;
-                old_process.gpu_usage_stats_last = old_process.data.gpu_usage_stats.clone();
-
-                old_process.data = process_data.clone();
+                old_process.update_from_process_data(process_data);
             } else {
                 // this is a new process, see if it belongs to a graphical app
 

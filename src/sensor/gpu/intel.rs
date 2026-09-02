@@ -1,9 +1,7 @@
 use anyhow::{bail, Result};
-use process_data::pci_slot::PciSlot;
-
 use std::path::PathBuf;
 
-use crate::sensor::pci::Device;
+use crate::sensor::pci::{Device, PciSlot};
 
 use super::GpuImpl;
 

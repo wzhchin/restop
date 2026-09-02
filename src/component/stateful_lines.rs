@@ -3,11 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use ratatui::{
-    layout::Rect,
-    text::{Line, Text},
-    Frame,
-};
+use ratatui::{layout::Rect, text::Line, Frame};
 
 use super::grouped_lines::GroupedLines;
 
@@ -17,24 +13,37 @@ pub struct LinesVerticalState {
     pub view_height: u16,
     cur_line: usize,
     end: usize,
+    dirty: bool,
 }
 
 impl LinesVerticalState {
+    pub fn focused_index(&self) -> Option<usize> {
+        (self.cur_line < self.end).then_some(self.cur_line)
+    }
+
     pub fn show_end(&self) -> usize {
         self.show_start.saturating_add(self.view_height.into())
     }
 
     pub fn focus_next(&mut self) {
-        self.cur_line = self.cur_line.saturating_add(1).clamp(0, self.end);
+        let previous = (self.cur_line, self.show_start);
+        self.cur_line = self
+            .cur_line
+            .saturating_add(1)
+            .clamp(0, self.end.saturating_sub(1));
         if self.cur_line >= self.show_end().saturating_sub(3) {
             self.show_start = self
                 .show_start
                 .saturating_add(1)
                 .clamp(0, self.end.saturating_sub(self.view_height.into()));
         }
+        if previous != (self.cur_line, self.show_start) {
+            self.dirty = true;
+        }
     }
 
     pub fn focus_prev(&mut self) {
+        let previous = (self.cur_line, self.show_start);
         self.cur_line = self.cur_line.saturating_sub(1).clamp(0, self.end);
         if self.cur_line >= self.show_start.saturating_add(3) {
             self.show_start = self
@@ -42,21 +51,29 @@ impl LinesVerticalState {
                 .saturating_sub(1)
                 .clamp(0, self.end.saturating_sub(self.view_height.into()));
         }
+        if previous != (self.cur_line, self.show_start) {
+            self.dirty = true;
+        }
     }
 
     fn update_end(&mut self, end: usize) {
         self.end = end;
+        self.cur_line = self.cur_line.min(self.end.saturating_sub(1));
         self.show_start = self
             .show_start
             .clamp(0, self.end.saturating_sub(self.view_height.into()));
     }
 
     pub fn update_view_height(&mut self, view_height: u16) {
+        let previous = (self.view_height, self.show_start);
         self.view_height = view_height;
         self.show_start = self.show_start.clamp(
             self.cur_line.saturating_sub(self.view_height.into()),
             self.cur_line,
-        )
+        );
+        if previous != (self.view_height, self.show_start) {
+            self.dirty = true;
+        }
     }
 }
 
@@ -100,6 +117,14 @@ impl<'a> StatefulColumn<'a> {
         self.header.replace(header);
     }
 
+    pub fn is_dirty(&self) -> bool {
+        self.state.dirty
+    }
+
+    pub fn mark_dirty(&mut self) {
+        self.state.dirty = true;
+    }
+
     pub fn update_lines<T, F>(&mut self, eles: &Arc<Vec<T>>, convert: F)
     where
         F: Fn(&T, bool) -> Line<'a>,
@@ -114,25 +139,27 @@ impl<'a> StatefulColumn<'a> {
             .collect();
 
         self.lines = lines;
+        self.state.dirty = false;
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         frame.render_widget(&self.header, Rect { height: 1, ..area });
 
-        let text = Text::from(self.lines.clone());
-
-        frame.render_widget(
-            text,
-            Rect {
-                y: area
-                    .y
-                    .saturating_add(1)
-                    .clamp(area.y, area.y.saturating_add(area.height).saturating_sub(1)),
-
-                height: area.height.saturating_sub(1),
-                ..area
-            },
-        );
+        // Keep formatted lines alive across redraws and render them by reference.
+        for (offset, line) in self.lines.iter().enumerate() {
+            let offset = u16::try_from(offset).unwrap_or(u16::MAX);
+            if offset >= area.height.saturating_sub(1) {
+                break;
+            }
+            frame.render_widget(
+                line,
+                Rect {
+                    y: area.y.saturating_add(1).saturating_add(offset),
+                    height: 1,
+                    ..area
+                },
+            );
+        }
     }
 }
 
@@ -308,5 +335,40 @@ impl<'a, 'b> StatefulLinesType<'a, 'b> {
             StatefulLinesType::Groups(ls) => ls.focus_prev(),
             StatefulLinesType::Lines(virt) => virt.focus_prev(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LinesVerticalState;
+
+    #[test]
+    fn focus_next_stays_on_last_line() {
+        let mut state = LinesVerticalState {
+            view_height: 10,
+            ..Default::default()
+        };
+        state.update_end(2);
+
+        state.focus_next();
+        state.focus_next();
+
+        assert_eq!(state.focused_index(), Some(1));
+    }
+
+    #[test]
+    fn updating_line_count_clamps_removed_selection() {
+        let mut state = LinesVerticalState {
+            view_height: 10,
+            ..Default::default()
+        };
+        state.update_end(3);
+        state.focus_next();
+        state.focus_next();
+        state.update_end(1);
+        assert_eq!(state.focused_index(), Some(0));
+
+        state.update_end(0);
+        assert_eq!(state.focused_index(), None);
     }
 }

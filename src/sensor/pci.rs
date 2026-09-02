@@ -1,9 +1,92 @@
-use std::{collections::BTreeMap, io::BufRead};
+use std::{
+    collections::BTreeMap,
+    error::Error,
+    fmt::{self, Display},
+    io::BufRead,
+    str::FromStr,
+};
 
 use anyhow::{Context, Result};
 use append_only_vec::AppendOnlyVec;
 use log::error;
 use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
+
+/// A PCI domain:bus:device.function address.
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, Default, Hash, PartialEq, Eq, PartialOrd, Ord,
+)]
+pub struct PciSlot {
+    pub domain: u16,
+    pub bus: u8,
+    pub number: u8,
+    pub function: u8,
+}
+
+impl PciSlot {
+    pub fn new(domain: u16, bus: u8, number: u8, function: u8) -> Self {
+        Self {
+            domain,
+            bus,
+            number,
+            function,
+        }
+    }
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct ParseError(String);
+
+impl Error for ParseError {}
+
+impl Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "unable to parse to PCI ID")
+    }
+}
+
+impl FromStr for PciSlot {
+    type Err = ParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let dot_split: Vec<&str> = value.split('.').collect();
+        if dot_split.len() != 2 {
+            return Err(ParseError("amount of '.' != 1".into()));
+        }
+
+        let colon_split: Vec<&str> = dot_split[0].split(':').collect();
+        if colon_split.len() != 3 {
+            return Err(ParseError("amount of ':' != 2".into()));
+        }
+
+        let domain = u16::from_str_radix(colon_split[0], 16)
+            .map_err(|_| ParseError("unable to parse domain".into()))?;
+        let bus = u8::from_str_radix(colon_split[1], 16)
+            .map_err(|_| ParseError("unable to parse bus".into()))?;
+        let number = u8::from_str_radix(colon_split[2], 16)
+            .map_err(|_| ParseError("unable to parse number".into()))?;
+        let function = u8::from_str_radix(dot_split[1], 16)
+            .map_err(|_| ParseError("unable to parse function".into()))?;
+
+        Ok(Self {
+            domain,
+            bus,
+            number,
+            function,
+        })
+    }
+}
+
+impl Display for PciSlot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{:04x}:{:02x}:{:02x}.{:x}",
+            self.domain, self.bus, self.number, self.function
+        )
+    }
+}
 
 static DEVICES: Lazy<AppendOnlyVec<Device>> = Lazy::new(AppendOnlyVec::new);
 
@@ -201,4 +284,23 @@ fn get_device_raw(in_vid: &u16, in_pid: &u16) -> Result<Device> {
     }
 
     o_device.context("Unable to fine this device")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::PciSlot;
+
+    #[test]
+    fn pci_id_from_string() {
+        let pci_id = PciSlot::new(0x0, 0x1, 0xfe, 0x3);
+        assert_eq!(pci_id, PciSlot::from_str("0000:01:fe.3").unwrap());
+    }
+
+    #[test]
+    fn pci_id_to_string() {
+        let pci_id = PciSlot::new(0x0, 0x1, 0xfe, 0x3);
+        assert_eq!("0000:01:fe.3", pci_id.to_string());
+    }
 }

@@ -13,10 +13,11 @@ debug = true
 incremental = true
 
 [dependencies]
-process-data = { path = "lib/process_data" }
 glob = { version = "0.3.3" }
 regex = "1.11.2"
 sysconf = "0.3.4"
+unescape = "0.1.0"
+uzers = "0.12.1"
 nvml-wrapper = "0.11.0"
 nix = { version = "0.30.1", default-features = false, features = [
     "signal",

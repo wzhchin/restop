@@ -1,7 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
 use chin_tools::AResult;
-use process_data::ReuseReader;
 use ratatui::layout::Rect;
 
 use crate::{
@@ -12,10 +11,10 @@ use crate::{
     },
     sensor::{
         battery::{Battery, BatteryData},
-        units::convert_energy,
+        units::{convert_energy, convert_power},
         Sensor,
     },
-    tarits::{None2NaN, None2NaNDef},
+    tarits::{None2NaN, None2NaNDef, None2NanString},
     view::theme::SharedTheme,
     view::{BlockArg, DetailArg},
 };
@@ -33,7 +32,7 @@ pub struct ResBattery {
 
 impl ResBattery {
     pub fn new(theme: SharedTheme) -> AResult<Vec<Self>> {
-        let paths = Battery::get_sysfs_paths(&mut ReuseReader::new())?;
+        let paths = Battery::get_sysfs_paths()?;
         let bs = paths
             .into_iter()
             .map(|path| ResBattery {
@@ -121,6 +120,22 @@ impl Resource for ResBattery {
 
         let properties = GroupedLines::builder(width, &self.theme)
             .kv_sep("Sys Path", info.sysfs_path.to_str().or_nan_def())
+            .kv_sep(
+                "State",
+                self.data
+                    .as_ref()
+                    .and_then(|data| data.state.as_ref().ok())
+                    .map(ToString::to_string)
+                    .or_nan_owned(),
+            )
+            .kv_sep(
+                "Power",
+                self.data
+                    .as_ref()
+                    .and_then(|data| data.power_usage.as_ref().ok())
+                    .map(|watts| convert_power(*watts))
+                    .or_nan_owned(),
+            )
             .kv_sep(
                 "Battery Health",
                 info.health().ok().or_nan(|e| format!("{:.1} %", e * 100.)),

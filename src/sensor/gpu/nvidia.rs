@@ -5,8 +5,6 @@ use nvml_wrapper::{
     Nvml,
 };
 use once_cell::sync::Lazy;
-use process_data::pci_slot::PciSlot;
-
 use std::path::PathBuf;
 
 static NVML: Lazy<Result<Nvml, NvmlError>> = Lazy::new(|| {
@@ -21,7 +19,7 @@ static NVML: Lazy<Result<Nvml, NvmlError>> = Lazy::new(|| {
     nvml
 });
 
-use crate::sensor::pci::Device;
+use crate::sensor::pci::{Device, PciSlot};
 
 use super::GpuImpl;
 

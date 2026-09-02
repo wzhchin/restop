@@ -5,8 +5,6 @@ mod other;
 
 use anyhow::{bail, Context, Result};
 use chin_tools::AResult;
-use process_data::pci_slot::PciSlot;
-
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -16,7 +14,7 @@ use std::{
 use glob::glob;
 
 use crate::{
-    sensor::pci::{get_device, Device},
+    sensor::pci::{get_device, Device, PciSlot},
     tarits::None2NanString,
 };
 

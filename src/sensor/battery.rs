@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
-use process_data::ReuseReader;
 
 use crate::tarits::{None2NaN, None2NanString};
 
@@ -153,17 +152,19 @@ pub struct Battery {
 }
 
 impl Battery {
-    pub fn get_sysfs_paths(reader: &mut ReuseReader) -> Result<Vec<PathBuf>> {
+    fn is_battery_type(value: &str) -> bool {
+        value.trim().eq_ignore_ascii_case("battery")
+    }
+
+    pub fn get_sysfs_paths() -> Result<Vec<PathBuf>> {
         let mut list = Vec::new();
         let entries = std::fs::read_dir("/sys/class/power_supply")?;
         for entry in entries {
             let entry = entry?;
-            if reader
-                .read(entry.path().join("type"), |e| {
-                    Ok(e.eq_ignore_ascii_case("battery"))
-                })
-                .unwrap_or(false)
-            {
+            let is_battery = std::fs::read_to_string(entry.path().join("type"))
+                .map(|value| Self::is_battery_type(&value))
+                .unwrap_or(false);
+            if !is_battery {
                 continue;
             }
 
@@ -315,5 +316,17 @@ impl Sensor for Battery {
         self.sysfs_path
             .file_name()
             .or_unk(|e| e.to_str().or_nan_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Battery;
+
+    #[test]
+    fn battery_type_matching_ignores_case_and_newline() {
+        assert!(Battery::is_battery_type("Battery\n"));
+        assert!(Battery::is_battery_type("BATTERY"));
+        assert!(!Battery::is_battery_type("Mains\n"));
     }
 }

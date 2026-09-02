@@ -638,39 +638,16 @@ dependencies = [
 
 [[package]]
 name = "nvml-wrapper"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c9bff0aa1d48904a1385ea2a8b97576fbdcbc9a3cfccd0d31fe978e1c4038c5"
-dependencies = [
- "bitflags",
- "libloading",
- "nvml-wrapper-sys 0.8.0",
- "static_assertions",
- "thiserror",
- "wrapcenum-derive",
-]
-
-[[package]]
-name = "nvml-wrapper"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d5c6c0ef9702176a570f06ad94f3198bc29c524c8b498f1b9346e1b1bdcbb3a"
 dependencies = [
  "bitflags",
  "libloading",
- "nvml-wrapper-sys 0.9.0",
+ "nvml-wrapper-sys",
  "static_assertions",
  "thiserror",
  "wrapcenum-derive",
-]
-
-[[package]]
-name = "nvml-wrapper-sys"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "698d45156f28781a4e79652b6ebe2eaa0589057d588d3aec1333f6466f13fcb5"
-dependencies = [
- "libloading",
 ]
 
 [[package]]
@@ -730,23 +707,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22244ce15aa966053a896d1accb3a6e68469b97c7f33f284b99f0d576879fc23"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "process-data"
-version = "1.4.0"
-dependencies = [
- "anyhow",
- "glob",
- "libc",
- "nvml-wrapper 0.10.0",
- "once_cell",
- "regex",
- "serde",
- "syscalls",
- "sysconf",
- "unescape",
- "uzers",
 ]
 
 [[package]]
@@ -836,15 +796,16 @@ dependencies = [
  "log",
  "nix",
  "num_cpus",
- "nvml-wrapper 0.11.0",
+ "nvml-wrapper",
  "once_cell",
- "process-data",
  "ratatui",
  "regex",
  "serde",
  "simplelog",
  "sysconf",
+ "unescape",
  "unicode-width 0.2.0",
+ "uzers",
 ]
 
 [[package]]
@@ -905,17 +866,6 @@ name = "serde_derive"
 version = "1.0.219"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b0276cf7f2c73365f7157c8123c21cd9a50fbbd844757af28ca1f5925fc2a00"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "serde_repr"
-version = "0.1.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c64451ba24fc7a6a2d60fc75dd9c83c90903b19028d4eff35e88fc1e86564e9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1031,16 +981,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "syscalls"
-version = "0.6.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43d0e35dc7d73976a53c7e6d7d177ef804a0c0ee774ec77bcc520c2216fd7cbe"
-dependencies = [
- "serde",
- "serde_repr",
 ]
 
 [[package]]
