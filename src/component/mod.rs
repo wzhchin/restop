@@ -2,7 +2,6 @@ use std::ops::Add;
 
 use ratatui::{
     style::{Color, Modifier, Stylize},
-    symbols::line::*,
     text::{Line, Span},
 };
 
@@ -13,6 +12,8 @@ use ratatui::style::Style;
 pub mod grouped_lines;
 pub mod input;
 pub mod stateful_lines;
+
+pub use grouped_lines::render_border;
 
 pub fn ls_kv(
     key: Option<&str>,
@@ -69,12 +70,12 @@ pub fn s_percent_graph(
     let graph_width = width.saturating_sub(3);
 
     let mut colors = [
-        Color::Green,
-        Color::Cyan,
-        Color::Blue,
-        Color::Yellow,
-        Color::Magenta,
-        Color::Red,
+        Color::Black,
+        Color::Black,
+        Color::Black,
+        Color::Black,
+        Color::Black,
+        Color::Black,
     ];
 
     if high_is_good {
@@ -123,6 +124,32 @@ pub fn s_percent_graph(
     ]
 }
 
+/// Map a history sample onto discrete braille bar units.
+/// A zero or non-finite value span yields 0 (no division by zero).
+pub(crate) fn history_bar_units(
+    value: f64,
+    min_value: f64,
+    max_value: f64,
+    line_height: u16,
+) -> usize {
+    const MAX_HEIGHT: usize = 4;
+    let steps = (MAX_HEIGHT as i32).saturating_mul(line_height as i32) as f64;
+    let span = max_value - min_value;
+    if steps == 0.0 || !span.is_finite() || span == 0.0 {
+        return 0;
+    }
+    let bar_sep = span / steps;
+    if !bar_sep.is_finite() || bar_sep == 0.0 {
+        return 0;
+    }
+    let units = ((value - min_value) / bar_sep).round();
+    if !units.is_finite() || units <= 0.0 {
+        0
+    } else {
+        units as usize
+    }
+}
+
 pub fn s_history_graph(
     width: u16,
     ring: &Ring<f64>,
@@ -141,23 +168,26 @@ pub fn s_history_graph(
         ['⡇', '⣇', '⣧', '⣷', '⣿'],
     ];
 
-    let bar_sep = (max_value - min_value) / (MAX_HEIGHT as i32 * line_height as i32) as f64;
-
     let mut lines: Vec<String> = vec![];
     for _ in 0..line_height {
         lines.push(String::with_capacity(width.into()));
     }
 
     let values: Vec<&f64> = ring.new_to_old_iter().take(width as usize * 2).collect();
+    let true_len = values.len().div_ceil(2);
+    let pad = (width as usize).saturating_sub(true_len);
 
-    values.chunks(2).for_each(|e| {
+    // Build left→right (oldest→newest of the window) with push, reverse once.
+    // Avoids O(n²) insert(0) per column.
+    values.chunks(2).rev().for_each(|e| {
+        // chunks are newest-first pairs; reverse iteration yields oldest-first columns.
         let left = e
             .first()
-            .map(|e| ((**e - min_value) / bar_sep).round() as usize)
+            .map(|e| history_bar_units(**e, min_value, max_value, line_height))
             .unwrap_or(0);
         let right = e
             .get(1)
-            .map(|e| ((**e - min_value) / bar_sep).round() as usize)
+            .map(|e| history_bar_units(**e, min_value, max_value, line_height))
             .unwrap_or(0);
 
         for i in 1..=line_height {
@@ -181,27 +211,26 @@ pub fn s_history_graph(
                         .and_then(|v| v.get(r.add(1).clamp(1, MAX_HEIGHT)))
                         .unwrap_or(&'?');
                 }
-                line.insert(0, *sym);
+                line.push(*sym);
             }
         }
     });
 
-    let true_len = values.len().div_ceil(2);
-    if (width as usize) >= true_len {
+    // Prepend padding (oldest side) then reverse each line so newest is on the right.
+    if pad > 0 {
         let limit = if line_height > 1 { 1 } else { 0 };
-        for line in &mut lines.iter_mut().take(limit) {
-            for _ in 0..((width as usize).saturating_sub(true_len)) {
-                line.insert(0, '⣀');
+        for (idx, line) in lines.iter_mut().enumerate() {
+            let fill = if idx < limit { '⣀' } else { ' ' };
+            let mut padded = String::with_capacity(width as usize);
+            for _ in 0..pad {
+                padded.push(fill);
             }
+            padded.push_str(line);
+            *line = padded;
         }
+    }
 
-        for line in &mut lines.iter_mut().skip(limit) {
-            for _ in 0..((width as usize).saturating_sub(true_len)) {
-                line.insert(0, ' ');
-            }
-        }
-    };
-
+    // Graph is drawn bottom-up (line 0 = lowest bar row).
     lines
         .into_iter()
         .rev()
@@ -262,45 +291,36 @@ impl PaddingH for Vec<Span<'static>> {
     }
 }
 
-pub fn render_border(
-    focused: bool,
-    area: ratatui::prelude::Rect,
-    buf: &mut ratatui::prelude::Buffer,
-) {
-    let tl = if focused { "╒" } else { TOP_LEFT };
-    let tr = if focused { "╕" } else { TOP_RIGHT };
-    let thor = if focused {
-        DOUBLE_HORIZONTAL
-    } else {
-        HORIZONTAL
-    };
-    let hor = HORIZONTAL;
-    let ver = VERTICAL;
-    let bl = BOTTOM_LEFT;
-    let br = BOTTOM_RIGHT;
+#[cfg(test)]
+mod tests {
+    use super::{history_bar_units, s_history_graph};
+    use crate::ring::Ring;
+    use ratatui::style::Color;
 
-    let top = area.top();
-    let right = area.right().saturating_sub(1);
-    let bot = area.bottom().saturating_sub(1);
-    let left = area.left();
-    let style = Style::new();
+    #[test]
+    fn zero_span_history_does_not_divide_by_zero() {
+        assert_eq!(history_bar_units(0.0, 0.0, 0.0, 3), 0);
+        assert_eq!(history_bar_units(50.0, 50.0, 50.0, 3), 0);
+        assert_eq!(history_bar_units(f64::NAN, 0.0, 0.0, 3), 0);
+        assert!(history_bar_units(50.0, 0.0, 100.0, 1) > 0);
 
-    buf.set_string(left, top, tl, style);
-    buf.set_string(right, top, tr, style);
-
-    buf.set_string(left, bot, bl, style);
-    buf.set_string(right, bot, br, style);
-
-    for i in left.saturating_add(1)..right {
-        buf.set_string(i, top, thor, style);
+        let mut ring = Ring::new(8);
+        ring.insert_at_first(0.0);
+        let _ = s_history_graph(8, &ring, 0.0, 0.0, 3, Color::Black);
     }
-    for i in left.saturating_add(1)..right {
-        buf.set_string(i, bot, hor, style);
-    }
-    for i in top.saturating_add(1)..bot {
-        buf.set_string(left, i, ver, style);
-    }
-    for i in top.saturating_add(1)..bot {
-        buf.set_string(right, i, ver, style);
+
+    #[test]
+    fn history_graph_puts_newest_sample_on_the_right() {
+        let mut ring = Ring::new(8);
+        for v in [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0] {
+            ring.insert_at_first(v);
+        }
+        ring.insert_at_first(100.0);
+
+        let spans = s_history_graph(4, &ring, 100.0, 0.0, 1, Color::Black);
+        let last = spans[0].content.chars().last();
+        // Newest pair is (100, 80) → braille '⣾'. The broken forward walk
+        // paired (100, 20) and put '⣸' on the right edge instead.
+        assert_eq!(last, Some('⣾'));
     }
 }
