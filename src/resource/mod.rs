@@ -39,7 +39,7 @@ use crate::{
         memory::MemoryData,
         network::{NetworkData, NetworkInterface},
     },
-    view::{NavigatorEvent, BlockArg, DetailArg},
+    view::{BlockArg, DetailArg, NavigatorEvent},
 };
 
 pub trait Resource {
@@ -169,8 +169,11 @@ pub enum ResourceType {
 }
 
 impl ResourceType {
+    pub fn is_process(&self) -> bool {
+        matches!(self, ResourceType::Process(_))
+    }
+
     pub fn fetch_data(&self, tx: &Sender<SensorReq>) {
-        let tx = tx.clone();
         let rsp = match self {
             ResourceType::CPU(rt) => SensorReq::CPU(rt.get_req()),
             ResourceType::Memory(rt) => {
@@ -186,7 +189,8 @@ impl ResourceType {
                 SensorReq::Process(())
             }
         };
-        tx.send(rsp).unwrap();
+        // Drop if the worker is busy rather than growing an unbounded queue.
+        let _ = tx.try_send(rsp);
     }
 
     pub fn get_id(&self) -> &str {
@@ -249,23 +253,45 @@ impl ResourceType {
         }
     }
 
+    pub fn hides_sidebar(&self) -> bool {
+        matches!(self, ResourceType::Process(process) if process.hides_sidebar())
+    }
+
+    pub fn render_header(&self, frame: &mut Frame, rect: Rect) {
+        if rect.height == 0 {
+            return;
+        }
+
+        let header_rect = Rect { height: 1, ..rect };
+        let type_name = self.get_type_name();
+        let name = self.get_name();
+        let header = if !name.is_empty() {
+            Line::from(vec![
+                Span::styled(type_name, Style::new().add_modifier(Modifier::BOLD)),
+                Span::raw("::"),
+                Span::raw(name),
+            ])
+        } else {
+            Span::styled(type_name, Style::new().add_modifier(Modifier::BOLD)).into()
+        };
+        frame.render_widget(header, header_rect);
+    }
+
+    pub fn render_process_list(&mut self, frame: &mut Frame, args: &DetailArg) {
+        if let ResourceType::Process(process) = self {
+            process.render_process_list(frame, args);
+        }
+    }
+
+    pub fn render_process_detail(&mut self, frame: &mut Frame, args: &DetailArg) {
+        if let ResourceType::Process(process) = self {
+            process.render_process_detail(frame, args);
+        }
+    }
+
     pub fn render_detail(&mut self, frame: &mut Frame, args: &mut DetailArg) {
         let rect = args.rect;
-        if rect.height >= 1 {
-            let header_rect = Rect { height: 1, ..rect };
-            let type_name = self.get_type_name();
-            let name = self.get_name();
-            let header = if !name.is_empty() {
-                Line::from(vec![
-                    Span::styled(type_name, Style::new().add_modifier(Modifier::BOLD)),
-                    Span::raw("::"),
-                    Span::raw(name),
-                ])
-            } else {
-                Span::styled(type_name, Style::new().add_modifier(Modifier::BOLD)).into()
-            };
-            frame.render_widget(header, header_rect);
-        }
+        self.render_header(frame, rect);
 
         if rect.height > 1 {
             let content_rect = Rect {
@@ -341,6 +367,7 @@ impl ResourceType {
                 if let ResourceType::Drive(rt) = self {
                     if rsp_id == rt.get_id() {
                         rt.update_data(data);
+                        return true;
                     }
                 }
             }
@@ -385,7 +412,8 @@ pub struct HardwareWorker {
 
 impl HardwareWorker {
     pub fn spawn(result_tx: &Sender<ResourceEvent>) -> Self {
-        let (tx, rx) = flume::unbounded();
+        // Bound the queue so a slow consumer cannot grow unbounded memory.
+        let (tx, rx) = flume::bounded(64);
 
         let result_tx = result_tx.clone();
         thread::Builder::new()

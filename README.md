@@ -24,3 +24,13 @@ I like the design of https://github.com/nokyan/resources and https://missioncent
     - resources: https://github.com/nokyan/resources
     - btm: https://github.com/ClementTsang/bottom
     - missioncenter: https://missioncenter.io/
+
+# Refresh interval
+
+restop samples hardware and processes every 2000 ms by default. Override the
+intervals independently with environment variables (values are clamped to
+250–60000 ms):
+
+```sh
+RESTOP_UPDATE_MS=1000 RESTOP_PROCESS_UPDATE_MS=2000 restop
+```

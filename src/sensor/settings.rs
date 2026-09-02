@@ -1,4 +1,24 @@
+use std::time::Duration;
+
 use anyhow::Result;
+
+const DEFAULT_UPDATE_MS: u64 = 2_000;
+const MIN_UPDATE_MS: u64 = 250;
+const MAX_UPDATE_MS: u64 = 60_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RefreshIntervals {
+    pub hardware: Duration,
+    pub process: Duration,
+}
+
+fn parse_interval_ms(value: Option<&str>, fallback_ms: u64) -> Duration {
+    let millis = value
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(fallback_ms)
+        .clamp(MIN_UPDATE_MS, MAX_UPDATE_MS);
+    Duration::from_millis(millis)
+}
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, Default, Hash)]
@@ -77,6 +97,20 @@ impl Settings {
         Default::default()
     }
 
+    /// Collection intervals are read once when the application starts.
+    /// Process collection is separate because it scales with the PID count.
+    pub fn refresh_intervals(&self) -> RefreshIntervals {
+        let hardware = parse_interval_ms(
+            std::env::var("RESTOP_UPDATE_MS").ok().as_deref(),
+            DEFAULT_UPDATE_MS,
+        );
+        let process = parse_interval_ms(
+            std::env::var("RESTOP_PROCESS_UPDATE_MS").ok().as_deref(),
+            hardware.as_millis() as u64,
+        );
+        RefreshIntervals { hardware, process }
+    }
+
     pub fn set_refresh_speed(&self, value: RefreshSpeed) -> Result<()> {
         Ok(())
     }
@@ -91,5 +125,39 @@ impl Settings {
 
     pub fn network_bits(&self) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_interval_ms, DEFAULT_UPDATE_MS, MAX_UPDATE_MS, MIN_UPDATE_MS};
+    use std::time::Duration;
+
+    #[test]
+    fn refresh_interval_defaults_to_two_seconds() {
+        assert_eq!(
+            parse_interval_ms(None, DEFAULT_UPDATE_MS),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            parse_interval_ms(Some("invalid"), DEFAULT_UPDATE_MS),
+            Duration::from_secs(2)
+        );
+    }
+
+    #[test]
+    fn refresh_interval_is_bounded() {
+        assert_eq!(
+            parse_interval_ms(Some("1"), DEFAULT_UPDATE_MS),
+            Duration::from_millis(MIN_UPDATE_MS)
+        );
+        assert_eq!(
+            parse_interval_ms(Some("999999"), DEFAULT_UPDATE_MS),
+            Duration::from_millis(MAX_UPDATE_MS)
+        );
+        assert_eq!(
+            parse_interval_ms(Some("1500"), DEFAULT_UPDATE_MS),
+            Duration::from_millis(1500)
+        );
     }
 }
