@@ -30,13 +30,15 @@ pub struct GpuData {
     pub pci_slot: PciSlot,
     pub usage_fraction: Option<f64>,
 
-    pub encode_fraction: Option<f64>,
-    pub decode_fraction: Option<f64>,
+    /// Video engine (encode + decode) utilization. On AMD these share a single
+    /// VCN block; on NVIDIA we report the higher of the independent enc/dec rates.
+    pub vcn_fraction: Option<f64>,
 
     pub total_vram: Option<isize>,
     pub used_vram: Option<isize>,
 
     pub clock_speed: Option<f64>,
+    pub max_clock_speed: Option<f64>,
     pub vram_speed: Option<f64>,
 
     pub temp: Option<f64>,
@@ -54,14 +56,13 @@ impl GpuData {
 
         let usage_fraction = gpu.usage().map(|usage| (usage as f64) / 100.0).ok();
 
-        let encode_fraction = gpu.encode_usage().map(|usage| (usage as f64) / 100.0).ok();
-
-        let decode_fraction = gpu.decode_usage().map(|usage| (usage as f64) / 100.0).ok();
+        let vcn_fraction = gpu.vcn_usage().map(|usage| (usage as f64) / 100.0).ok();
 
         let total_vram = gpu.total_vram().ok();
         let used_vram = gpu.used_vram().ok();
 
         let clock_speed = gpu.core_frequency().ok();
+        let max_clock_speed = gpu.max_core_frequency().ok();
         let vram_speed = gpu.vram_frequency().ok();
 
         let temp = gpu.temperature().ok();
@@ -76,11 +77,11 @@ impl GpuData {
             id: pci_slot.to_string(),
             pci_slot,
             usage_fraction,
-            encode_fraction,
-            decode_fraction,
+            vcn_fraction,
             total_vram,
             used_vram,
             clock_speed,
+            max_clock_speed,
             vram_speed,
             temp,
             power_usage,
@@ -114,14 +115,18 @@ pub trait GpuImpl {
 
     fn name(&self) -> Result<String>;
     fn usage(&self) -> Result<isize>;
-    fn encode_usage(&self) -> Result<isize>;
-    fn decode_usage(&self) -> Result<isize>;
+    fn vcn_usage(&self) -> Result<isize> {
+        bail!("vcn usage not implemented")
+    }
     fn used_vram(&self) -> Result<isize>;
     fn total_vram(&self) -> Result<isize>;
     fn temperature(&self) -> Result<f64>;
     fn power_usage(&self) -> Result<f64>;
     fn core_frequency(&self) -> Result<f64>;
     fn vram_frequency(&self) -> Result<f64>;
+    fn max_core_frequency(&self) -> Result<f64> {
+        bail!("max core frequency not implemented")
+    }
     fn power_cap(&self) -> Result<f64>;
     fn power_cap_max(&self) -> Result<f64>;
 
@@ -154,6 +159,50 @@ pub trait GpuImpl {
             .with_context(|| format!("error parsing file {}", &path.to_string_lossy()))
     }
 
+    /// Parses an amdgpu `pp_dpm_<engine>` file such as `pp_dpm_sclk` / `pp_dpm_mclk`.
+    ///
+    /// Lines look like `0: 800Mhz *` where the trailing `*` marks the active
+    /// power state. Returns `(active_hz, max_hz)` in Hz (MHz in the file → Hz).
+    fn read_pp_dpm<P: AsRef<Path> + std::marker::Send>(
+        &self,
+        file: P,
+    ) -> Result<(f64, f64)> {
+        // NOTE: deliberately *not* using `read_device_file`, which strips
+        // newlines (`.replace('\n', "")`) — that would collapse every power
+        // state onto a single line and we'd only parse the first one.
+        let path = self.sysfs_path().join("device").join(file);
+        let raw = std::fs::read_to_string(&path)
+            .with_context(|| format!("error reading file {}", path.to_string_lossy()))?;
+        let mut active: Option<f64> = None;
+        let mut max: f64 = 0.0;
+        for line in raw.lines() {
+            // format: `0: 800Mhz *` or `1: 1100Mhz`
+            let Some((_, rest)) = line.split_once(':') else {
+                continue;
+            };
+            let mhz = rest
+                .split_whitespace()
+                .next()
+                .and_then(|tok| {
+                    tok.trim_end_matches("Mhz")
+                        .trim_end_matches("MHz")
+                        .parse::<f64>()
+                        .ok()
+                });
+            let Some(mhz) = mhz else { continue };
+
+            if mhz > max {
+                max = mhz;
+            }
+            if line.contains('*') {
+                active = Some(mhz);
+            }
+        }
+        let active = active.unwrap_or(max);
+        // MHz → Hz (the rest of the code treats frequencies as Hz)
+        Ok((active * 1_000_000.0, max * 1_000_000.0))
+    }
+
     // These are preimplemented ways of getting information through the DRM and hwmon interface.
     // It's also used as a fallback.
 
@@ -171,6 +220,29 @@ pub trait GpuImpl {
 
     fn drm_total_vram(&self) -> Result<isize> {
         self.read_device_int("mem_info_vram_total")
+    }
+
+    /// Reads the PCIe link info from the generic sysfs attributes
+    /// `current_link_speed`, `max_link_speed`, `*_link_width`.
+    ///
+    /// Returns `(current, max)` formatted strings, e.g. `("16.0 GT/s x16", "16.0 GT/s x16")`.
+    fn pcie_link(&self) -> Result<(String, String)> {
+        let speed = |file: &str| -> Result<String> {
+            Ok(self.read_device_file(file)?.trim().to_owned())
+        };
+        let width = |file: &str| -> Result<String> {
+            Ok(self.read_device_file(file)?.trim().to_owned())
+        };
+
+        let cur_speed = speed("current_link_speed")?;
+        let max_speed = speed("max_link_speed")?;
+        let cur_width = width("current_link_width").unwrap_or_default();
+        let max_width = width("max_link_width").unwrap_or_default();
+
+        Ok((
+            format!("{cur_speed} x{cur_width}"),
+            format!("{max_speed} x{max_width}"),
+        ))
     }
 
     fn hwmon_temperature(&self) -> Result<f64> {
@@ -365,21 +437,12 @@ impl Gpu {
         }
     }
 
-    pub fn encode_usage(&self) -> Result<isize> {
+    pub fn vcn_usage(&self) -> Result<isize> {
         match self {
-            Gpu::Amd(gpu) => gpu.encode_usage(),
-            Gpu::Nvidia(gpu) => gpu.encode_usage(),
-            Gpu::Intel(gpu) => gpu.encode_usage(),
-            Gpu::Other(gpu) => gpu.encode_usage(),
-        }
-    }
-
-    pub fn decode_usage(&self) -> Result<isize> {
-        match self {
-            Gpu::Amd(gpu) => gpu.decode_usage(),
-            Gpu::Nvidia(gpu) => gpu.decode_usage(),
-            Gpu::Intel(gpu) => gpu.decode_usage(),
-            Gpu::Other(gpu) => gpu.decode_usage(),
+            Gpu::Amd(gpu) => gpu.vcn_usage(),
+            Gpu::Nvidia(gpu) => gpu.vcn_usage(),
+            Gpu::Intel(gpu) => gpu.vcn_usage(),
+            Gpu::Other(gpu) => gpu.vcn_usage(),
         }
     }
 
@@ -437,6 +500,15 @@ impl Gpu {
         }
     }
 
+    pub fn max_core_frequency(&self) -> Result<f64> {
+        match self {
+            Gpu::Amd(gpu) => gpu.max_core_frequency(),
+            Gpu::Nvidia(gpu) => gpu.max_core_frequency(),
+            Gpu::Intel(gpu) => gpu.max_core_frequency(),
+            Gpu::Other(gpu) => gpu.max_core_frequency(),
+        }
+    }
+
     pub fn power_cap(&self) -> Result<f64> {
         match self {
             Gpu::Amd(gpu) => gpu.power_cap(),
@@ -461,6 +533,15 @@ impl Gpu {
             Gpu::Nvidia(g) => g.sysfs_path(),
             Gpu::Intel(g) => g.sysfs_path(),
             Gpu::Other(g) => g.sysfs_path(),
+        }
+    }
+
+    pub fn pcie_link(&self) -> Result<(String, String)> {
+        match self {
+            Gpu::Amd(g) => g.pcie_link(),
+            Gpu::Nvidia(g) => g.pcie_link(),
+            Gpu::Intel(g) => g.pcie_link(),
+            Gpu::Other(g) => g.pcie_link(),
         }
     }
 }

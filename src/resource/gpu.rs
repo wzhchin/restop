@@ -8,16 +8,19 @@ use crate::{
         ls_history_graph,
         stateful_lines::{StatefulGroupedLines, StatefulLinesType},
     },
-    ring::Ring,
+    ring::{Ring, DEFAULT_HISTORY_LEN},
     sensor::{
         gpu::{Gpu, GpuData},
-        units::convert_power,
+        units::{convert_frequency, convert_power, convert_storage, convert_temperature},
     },
-    tarits::{None2NaN, None2NaNDef, None2NanString},
+    tarits::{format_fraction_as_percent, None2NaN, None2NaNDef, None2NanString},
     view::{theme::SharedTheme, BlockArg, DetailArg},
 };
 
 use super::{Resource, SensorResultType, SensorRsp};
+
+/// Utilization/VCN history is stored as 0–1 fractions; graph max matches that unit.
+pub(crate) const GPU_USAGE_GRAPH_MAX: f64 = 1.0;
 
 #[derive(Debug)]
 pub struct ResGPU {
@@ -31,13 +34,8 @@ pub struct ResGPU {
 
     total_usage_history: Ring<f64>,
 
-    video_decode_utilzation_history: Ring<f64>,
-    video_encode_utilzation_history: Ring<f64>,
+    vcn_usage_history: Ring<f64>,
 
-    max_clock_speed: Option<usize>,
-
-    opengl_version: SharedStr,
-    vulkan_version: SharedStr,
     pci_express_speed: SharedStr,
     max_pci_express_speed: SharedStr,
 
@@ -52,20 +50,21 @@ impl ResGPU {
             .into_iter()
             .map(|e| {
                 let id = e.pci_slot().to_string();
+
+                let (pci_express_speed, max_pci_express_speed) = e
+                    .pcie_link()
+                    .unwrap_or(("N/A".to_string(), "N/A".to_string()));
+
                 Self {
                     id,
                     theme: theme.clone(),
                     info: Arc::new(e),
-                    total_usage_history: Ring::new(1000),
+                    total_usage_history: Ring::new(DEFAULT_HISTORY_LEN),
                     gpu_data: None,
                     viewer_state: StatefulGroupedLines::default(),
-                    max_clock_speed: None,
-                    opengl_version: "".into(),
-                    vulkan_version: "".into(),
-                    pci_express_speed: "".into(),
-                    max_pci_express_speed: "".into(),
-                    video_decode_utilzation_history: Ring::new(1000),
-                    video_encode_utilzation_history: Ring::new(1000),
+                    pci_express_speed: pci_express_speed.into(),
+                    max_pci_express_speed: max_pci_express_speed.into(),
+                    vcn_usage_history: Ring::new(DEFAULT_HISTORY_LEN),
                 }
             })
             .collect())
@@ -91,15 +90,11 @@ impl Resource for ResGPU {
     }
 
     fn update_data(&mut self, data: &Self::Rsp) {
-        log::info!("update gpu data");
         if let Some(val) = data.usage_fraction {
             self.total_usage_history.insert_at_first(val);
         }
-        if let Some(val) = data.decode_fraction {
-            self.video_decode_utilzation_history.insert_at_first(val);
-        }
-        if let Some(val) = data.encode_fraction {
-            self.video_encode_utilzation_history.insert_at_first(val);
+        if let Some(val) = data.vcn_fraction {
+            self.vcn_usage_history.insert_at_first(val);
         }
 
         self.gpu_data.replace(data.clone());
@@ -119,18 +114,23 @@ impl Resource for ResGPU {
             GroupedLines::builder(width, &self.theme)
                 .kv(
                     "UR",
-                    gpu_data
-                        .usage_fraction
-                        .map(|v| format!("{:.1} %", v))
-                        .or_nan_def(),
+                    format!(
+                        "{}  {}",
+                        gpu_data
+                            .usage_fraction
+                            .or_nan(|e| format_fraction_as_percent(*e)),
+                        gpu_data
+                            .temp
+                            .or_nan(|e| convert_temperature(*e)),
+                    ),
                 )
                 .lines(ls_history_graph(
                     width,
                     &self.total_usage_history,
-                    1.,
+                    GPU_USAGE_GRAPH_MAX,
                     0.,
                     3,
-                    ratatui::style::Color::Red,
+                    ratatui::style::Color::Black,
                 ))
                 .active(args.focused)
                 .build(title)?
@@ -163,54 +163,54 @@ impl Resource for ResGPU {
                     "Utilization",
                     gpu_data
                         .usage_fraction
-                        .or_nan(|e| format!("{:.1} %", e * 100.)),
+                        .or_nan(|e| format_fraction_as_percent(*e)),
                 )
                 .lines(ls_history_graph(
                     width - 2,
                     &self.total_usage_history,
-                    100.,
+                    GPU_USAGE_GRAPH_MAX,
                     0.,
                     3,
-                    ratatui::style::Color::Green,
+                    ratatui::style::Color::Black,
                 ))
                 .empty_sep()
+                .kv(
+                    "Temperature",
+                    gpu_data.temp.or_nan(|e| convert_temperature(*e)),
+                )
+                .empty_sep()
                 .kv("Clock Speed", {
-                    if let (None, None) = (gpu_data.clock_speed, self.max_clock_speed) {
-                        gpu_data.clock_speed.or_nan_owned()
+                    if let (None, None) = (gpu_data.clock_speed, gpu_data.max_clock_speed) {
+                        gpu_data.clock_speed.or_nan(|e| convert_frequency(*e))
                     } else {
                         format!(
                             "{} / {}",
-                            gpu_data.clock_speed.or_nan_owned(),
-                            self.max_clock_speed.or_nan_owned()
+                            gpu_data.clock_speed.or_nan(|e| convert_frequency(*e)),
+                            gpu_data.max_clock_speed.or_nan(|e| convert_frequency(*e)),
                         )
                     }
                 })
                 .kv_sep(
                     "VRam Used / Total / Speed",
                     format!(
-                        "{} / {} /{}",
-                        gpu_data.used_vram.or_nan_owned(),
-                        gpu_data.total_vram.or_nan_owned(),
-                        gpu_data.vram_speed.or_nan_owned()
+                        "{} / {} / {}",
+                        gpu_data
+                            .used_vram
+                            .or_nan(|e| convert_storage(*e as f64, false)),
+                        gpu_data
+                            .total_vram
+                            .or_nan(|e| convert_storage(*e as f64, false)),
+                        gpu_data.vram_speed.or_nan(|e| convert_frequency(*e)),
                     ),
                 )
-                .kv("Decode Utilzation", gpu_data.decode_fraction.or_nan_owned())
+                .kv("Video Utilzation", gpu_data.vcn_fraction.or_nan(|e| format_fraction_as_percent(*e)))
                 .lines(ls_history_graph(
                     width - 2,
-                    &self.video_decode_utilzation_history,
-                    100.,
+                    &self.vcn_usage_history,
+                    GPU_USAGE_GRAPH_MAX,
                     0.,
                     3,
-                    ratatui::style::Color::Green,
-                ))
-                .kv("Encode Utilzation", gpu_data.encode_fraction.or_nan_owned())
-                .lines(ls_history_graph(
-                    width - 2,
-                    &self.video_encode_utilzation_history,
-                    100.,
-                    0.,
-                    3,
-                    ratatui::style::Color::Green,
+                    ratatui::style::Color::Black,
                 ))
                 .active(args.active)
                 .build("Usage")?;
@@ -218,6 +218,7 @@ impl Resource for ResGPU {
         }
 
         let props = GroupedLines::builder(width, &self.theme)
+            .kv_sep("Name", self.info.name().ok().or_unk_def())
             .kv_sep(
                 "Manufacturer",
                 self.info.get_vendor_name().ok().or_unk_def(),
@@ -225,12 +226,28 @@ impl Resource for ResGPU {
             .kv_sep("PCI Slot", self.info.pci_slot().to_string())
             .kv_sep("Driver Used", self.info.driver())
             .kv_sep(
-                "Max Power Cap",
-                self.info.power_cap_max().ok().or_nan(|e| convert_power(*e)),
+                "Power Used / Cap / Max",
+                format!(
+                    "{} / {} / {}",
+                    self.gpu_data
+                        .as_ref()
+                        .and_then(|d| d.power_usage)
+                        .or_nan(|e| convert_power(*e)),
+                    self.gpu_data
+                        .as_ref()
+                        .and_then(|d| d.power_cap)
+                        .or_nan(|e| convert_power(*e)),
+                    self.info.power_cap_max().ok().or_nan(|e| convert_power(*e)),
+                ),
             )
-            .kv("OpenGL Version", self.opengl_version.as_str())
-            .kv("Vulkan Version", self.vulkan_version.as_str())
-            .kv("PCI Express Speed", self.pci_express_speed.as_str())
+            .kv(
+                "PCI Express Speed",
+                format!(
+                    "{} / {}",
+                    self.pci_express_speed.as_str(),
+                    self.max_pci_express_speed.as_str(),
+                ),
+            )
             .active(args.active)
             .build("Props")?;
         blocks.push(props);
@@ -242,5 +259,20 @@ impl Resource for ResGPU {
 
     fn handle_navi_event(&mut self, _event: &crate::view::NavigatorEvent) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GPU_USAGE_GRAPH_MAX;
+    use crate::tarits::format_fraction_as_percent;
+
+    #[test]
+    fn gpu_fraction_label_and_graph_share_0_1_scale() {
+        assert_eq!(GPU_USAGE_GRAPH_MAX, 1.0);
+        let label = format_fraction_as_percent(0.5);
+        assert_eq!(label, "50.0 %");
+        assert!(!label.contains("0.5 %"));
+        assert!(!format_fraction_as_percent(f64::NAN).contains("NaN"));
     }
 }

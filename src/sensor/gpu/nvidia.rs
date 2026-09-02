@@ -99,24 +99,22 @@ impl GpuImpl for NvidiaGpu {
             .or_else(|_| self.drm_usage())
     }
 
-    fn encode_usage(&self) -> Result<isize> {
+    /// NVML exposes independent encoder and decoder rates; report the higher of
+    /// the two as a single "video engine" utilization.
+    fn vcn_usage(&self) -> Result<isize> {
         Self::nvml_device(&self.pci_slot_string)
             .and_then(|dev| {
-                dev.encoder_utilization()
-                    .context("unable to get utilization rates through NVML")
+                let enc = dev
+                    .encoder_utilization()
+                    .map(|u| u.utilization as isize)
+                    .unwrap_or(0);
+                let dec = dev
+                    .decoder_utilization()
+                    .map(|u| u.utilization as isize)
+                    .unwrap_or(0);
+                Ok(enc.max(dec))
             })
-            .map(|usage| usage.utilization as isize)
-            .context("encode usage not implemented for NVIDIA not using the nvidia driver")
-    }
-
-    fn decode_usage(&self) -> Result<isize> {
-        Self::nvml_device(&self.pci_slot_string)
-            .and_then(|dev| {
-                dev.decoder_utilization()
-                    .context("unable to get utilization rates through NVML")
-            })
-            .map(|usage| usage.utilization as isize)
-            .context("decode usage not implemented for NVIDIA not using the nvidia driver")
+            .context("video utilization not available for NVIDIA not using the nvidia driver")
     }
 
     fn used_vram(&self) -> Result<isize> {

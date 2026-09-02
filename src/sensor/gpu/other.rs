@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::path::PathBuf;
 
 use crate::sensor::pci::{Device, PciSlot};
@@ -60,14 +60,6 @@ impl GpuImpl for OtherGpu {
 
     fn usage(&self) -> Result<isize> {
         self.drm_usage()
-    }
-
-    fn encode_usage(&self) -> Result<isize> {
-        bail!("encode usage not implemented for other")
-    }
-
-    fn decode_usage(&self) -> Result<isize> {
-        bail!("decode usage not implemented for other")
     }
 
     fn used_vram(&self) -> Result<isize> {

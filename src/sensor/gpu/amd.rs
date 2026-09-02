@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use hashbrown::HashMap;
 use once_cell::sync::Lazy;
 
@@ -112,12 +112,10 @@ impl GpuImpl for AmdGpu {
         self.drm_usage()
     }
 
-    fn encode_usage(&self) -> Result<isize> {
-        bail!("encode usage not implemented for AMD")
-    }
-
-    fn decode_usage(&self) -> Result<isize> {
-        bail!("decode usage not implemented for AMD")
+    /// AMD exposes a single VCN block (shared by encode + decode) as
+    /// `vcn_busy_percent`. Fall back to overall GPU busy percent if absent.
+    fn vcn_usage(&self) -> Result<isize> {
+        self.read_device_int("vcn_busy_percent").or_else(|_| self.drm_usage())
     }
 
     fn used_vram(&self) -> Result<isize> {
@@ -137,11 +135,20 @@ impl GpuImpl for AmdGpu {
     }
 
     fn core_frequency(&self) -> Result<f64> {
+        // hwmon `freq1_input` is sclk in Hz; fall back to the active pp_dpm_sclk state.
         self.hwmon_core_frequency()
+            .or_else(|_| self.read_pp_dpm("pp_dpm_sclk").map(|(active, _)| active))
     }
 
     fn vram_frequency(&self) -> Result<f64> {
+        // hwmon `freq2_input` (mclk) is often missing on AMD; use the active
+        // mclk power state from `pp_dpm_mclk` instead.
         self.hwmon_vram_frequency()
+            .or_else(|_| self.read_pp_dpm("pp_dpm_mclk").map(|(active, _)| active))
+    }
+
+    fn max_core_frequency(&self) -> Result<f64> {
+        self.read_pp_dpm("pp_dpm_sclk").map(|(_, max)| max)
     }
 
     fn power_cap(&self) -> Result<f64> {
