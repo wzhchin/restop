@@ -11,3 +11,59 @@ src/config.rs
 .flatpak-builder/
 .vscode/
 vendor
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Python virtual environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Build outputs
+/build/
+/dist/
+/out/
+/target/
+.gradle/
+
+# Test and coverage outputs
+.coverage
+coverage/
+htmlcov/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+\#*\#
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+NUL
+
+# Agents
+
+## claude
+settings.local.json
+
