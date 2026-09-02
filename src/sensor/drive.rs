@@ -1,10 +1,7 @@
 use anyhow::{Context, Result};
 use chin_tools::AResult;
 use nix::sys::statvfs::statvfs;
-use once_cell::sync::Lazy;
-use regex::Regex;
 use std::{
-    collections::HashMap,
     fmt::Display,
     path::{Path, PathBuf},
 };
@@ -13,9 +10,35 @@ use crate::tarits::PathString;
 
 use super::{units::convert_storage, Sensor};
 
-const SYS_STATS: &str = r" *(?P<read_ios>[0-9]*) *(?P<read_merges>[0-9]*) *(?P<read_sectors>[0-9]*) *(?P<read_ticks>[0-9]*) *(?P<write_ios>[0-9]*) *(?P<write_merges>[0-9]*) *(?P<write_sectors>[0-9]*) *(?P<write_ticks>[0-9]*) *(?P<in_flight>[0-9]*) *(?P<io_ticks>[0-9]*) *(?P<time_in_queue>[0-9]*) *(?P<discard_ios>[0-9]*) *(?P<discard_merges>[0-9]*) *(?P<discard_sectors>[0-9]*) *(?P<discard_ticks>[0-9]*) *(?P<flush_ios>[0-9]*) *(?P<flush_ticks>[0-9]*)";
+/// Parsed fields from `/sys/block/*/stat` that we actually use.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DiskStats {
+    pub read_sectors: usize,
+    pub write_sectors: usize,
+    pub read_ticks: usize,
+    pub write_ticks: usize,
+}
 
-static RE_DRIVE: Lazy<Regex> = Lazy::new(|| Regex::new(SYS_STATS).unwrap());
+impl DiskStats {
+    /// Kernel `stat` layout (whitespace-separated); indices from Documentation/block/stat.rst.
+    pub fn parse(stat: &str) -> Option<Self> {
+        let mut it = stat.split_whitespace();
+        let _read_ios = it.next()?;
+        let _read_merges = it.next()?;
+        let read_sectors = it.next()?.parse().ok()?;
+        let read_ticks = it.next()?.parse().ok()?;
+        let _write_ios = it.next()?;
+        let _write_merges = it.next()?;
+        let write_sectors = it.next()?.parse().ok()?;
+        let write_ticks = it.next()?.parse().ok()?;
+        Some(Self {
+            read_sectors,
+            write_sectors,
+            read_ticks,
+            write_ticks,
+        })
+    }
+}
 
 #[derive(Debug)]
 pub struct DriveData {
@@ -23,7 +46,7 @@ pub struct DriveData {
     pub is_virtual: bool,
     pub writable: Result<bool>,
     pub removable: Result<bool>,
-    pub disk_stats: HashMap<String, usize>,
+    pub disk_stats: DiskStats,
     pub capacity: Result<u64>,
 }
 
@@ -35,6 +58,25 @@ impl DriveData {
         let removable = inner.removable();
         let disk_stats = inner.sys_stats().unwrap_or_default();
         let capacity = inner.capacity();
+
+        Self {
+            inner,
+            is_virtual,
+            writable,
+            removable,
+            disk_stats,
+            capacity,
+        }
+    }
+
+    /// Cheap poll: only re-read stats / flags, keep existing identity fields.
+    pub fn poll_stats(path: &Path) -> Self {
+        let inner = Drive::from_sysfs_light(path);
+        let is_virtual = false; // non-virtual drives only reach here via ResDrive
+        let writable = inner.writable();
+        let removable = inner.removable();
+        let disk_stats = inner.sys_stats().unwrap_or_default();
+        let capacity = Ok(0);
 
         Self {
             inner,
@@ -128,6 +170,22 @@ impl Drive {
         drive
     }
 
+    /// Path + device name only (no model/type sysfs reads) for hot-path polls.
+    pub fn from_sysfs_light<P: AsRef<Path>>(sysfs_path: P) -> Drive {
+        let path = sysfs_path.as_ref().to_path_buf();
+        let block_device = path
+            .file_name()
+            .expect("sysfs path ends with \"..\"?")
+            .to_string_lossy()
+            .to_string();
+
+        Self {
+            sysfs_path: path,
+            block_device,
+            ..Self::default()
+        }
+    }
+
     /// Returns the SysFS Paths of possible drives
     ///
     /// # Errors
@@ -169,24 +227,12 @@ impl Drive {
     ///
     /// Will return `Err` if the are errors during
     /// reading or parsing
-    pub fn sys_stats(&self) -> Result<HashMap<String, usize>> {
+    pub fn sys_stats(&self) -> Result<DiskStats> {
         let stat = std::fs::read_to_string(self.sysfs_path.join("stat"))
             .with_context(|| format!("unable to read /sys/block/{}/stat", self.block_device))?;
 
-        let captures = RE_DRIVE
-            .captures(&stat)
-            .with_context(|| format!("unable to parse /sys/block/{}/stat", self.block_device))?;
-
-        Ok(RE_DRIVE
-            .capture_names()
-            .flatten()
-            .filter_map(|named_capture| {
-                Some((
-                    named_capture.to_string(),
-                    captures.name(named_capture)?.as_str().parse().ok()?,
-                ))
-            })
-            .collect())
+        DiskStats::parse(&stat)
+            .with_context(|| format!("unable to parse /sys/block/{}/stat", self.block_device))
     }
 
     fn drive_type(&self) -> Result<DriveType> {
@@ -344,27 +390,36 @@ impl Partition {
     pub fn fetch() -> AResult<Vec<Partition>> {
         let lines = std::fs::read_to_string("/proc/mounts")?;
 
-        let mut result = vec![];
+        let mut result = Vec::with_capacity(16);
 
         for line in lines.lines() {
-            let fields: Vec<&str> = line.split_whitespace().collect();
-            if fields.len() >= 3 {
-                let device = fields[0];
-                let mount_point = fields[1];
-                let point = fields[2];
+            let mut fields = line.split_whitespace();
+            let Some(device) = fields.next() else {
+                continue;
+            };
+            let Some(mount_point) = fields.next() else {
+                continue;
+            };
+            let Some(fs_type) = fields.next() else {
+                continue;
+            };
 
-                if let Ok(stats) = statvfs(mount_point) {
-                    let total_space_bytes = stats.blocks() * stats.fragment_size();
-                    let available_space_bytes = stats.blocks_available() * stats.block_size();
+            // Skip pseudo / non-block mounts early to avoid expensive statvfs.
+            if !device.starts_with('/') {
+                continue;
+            }
 
-                    result.push(Partition {
-                        total_bytes: total_space_bytes,
-                        free_bytes: available_space_bytes,
-                        mount_point: mount_point.to_owned(),
-                        fs_type: point.to_owned(),
-                        device: device.to_owned(),
-                    });
-                }
+            if let Ok(stats) = statvfs(mount_point) {
+                let total_space_bytes = stats.blocks() * stats.fragment_size();
+                let available_space_bytes = stats.blocks_available() * stats.block_size();
+
+                result.push(Partition {
+                    total_bytes: total_space_bytes,
+                    free_bytes: available_space_bytes,
+                    mount_point: mount_point.to_owned(),
+                    fs_type: fs_type.to_owned(),
+                    device: device.to_owned(),
+                });
             }
         }
         Ok(result)

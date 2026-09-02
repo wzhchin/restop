@@ -7,12 +7,12 @@ use crate::{
         ls_history_graph,
         stateful_lines::{StatefulGroupedLines, StatefulLinesType},
     },
-    ring::Ring,
+    ring::{Ring, DEFAULT_HISTORY_LEN},
     sensor::{
         memory::{self, MemoryData, MemoryDevice},
         units::convert_storage,
     },
-    tarits::{None2NaN, None2NanString},
+    tarits::{format_fraction_as_percent, None2NaN, None2NanString},
     view::theme::SharedTheme,
     view::{BlockArg, DetailArg},
 };
@@ -24,6 +24,7 @@ pub struct ResMEM {
     info: Vec<MemoryDevice>,
 
     pub formatted_used_mem: Option<String>,
+    pub formatted_available_mem: Option<String>,
     pub formatted_total_mem: Option<String>,
     pub mem_usage_percent: Option<f64>,
 
@@ -50,46 +51,52 @@ impl ResMEM {
 
             theme,
             formatted_used_mem: Default::default(),
+            formatted_available_mem: Default::default(),
             formatted_total_mem: Default::default(),
             mem_usage_percent: Default::default(),
-            usage_history: Ring::new(1000),
+            usage_history: Ring::new(DEFAULT_HISTORY_LEN),
             formatted_used_swap: Default::default(),
             formatted_total_swap: Default::default(),
             swap_usage_percent: Default::default(),
-            swap_usage_history: Ring::new(1000),
+            swap_usage_history: Ring::new(DEFAULT_HISTORY_LEN),
             viewer_state: Default::default(),
         })
     }
 
     pub fn mem_usage(&self) -> String {
-        let mut label = String::new();
-        match self.formatted_used_mem.as_ref() {
-            Some(v) => label.push_str(v.as_str()),
-            None => label.push_str("NaN"),
-        };
-
-        label.push_str(" | ");
-
-        if let Some(percent) = self.mem_usage_percent.as_ref() {
-            label.push_str(format!("{:.1} %", percent * 100.).as_str());
-        }
-        label
+        format_compact_usage(
+            self.formatted_used_mem.as_deref(),
+            self.mem_usage_percent,
+        )
     }
 
     pub fn swap_usage(&self) -> String {
-        let mut label = String::new();
-        match self.formatted_used_swap.as_ref() {
-            Some(v) => label.push_str(v.as_str()),
-            None => label.push_str("NaN"),
-        };
-
-        label.push_str(" | ");
-
-        if let Some(percent) = self.swap_usage_percent.as_ref() {
-            label.push_str(format!("{:.1} %", percent * 100.).as_str());
-        }
-        label
+        format_compact_usage(
+            self.formatted_used_swap.as_deref(),
+            self.swap_usage_percent,
+        )
     }
+}
+
+/// Compact used/swap label. Missing or non-finite values are `N/A`, never `NaN`.
+pub(crate) fn format_compact_usage(
+    formatted_used: Option<&str>,
+    usage_fraction: Option<f64>,
+) -> String {
+    let mut label = String::new();
+    match formatted_used {
+        Some(v) => label.push_str(v),
+        None => label.push_str("N/A"),
+    }
+    label.push_str(" | ");
+    match usage_fraction {
+        Some(fraction) if fraction.is_finite() => {
+            label.push_str(&format_fraction_as_percent(fraction));
+        }
+        Some(_) => label.push_str("N/A"),
+        None => {}
+    }
+    label
 }
 
 impl Resource for ResMEM {
@@ -130,6 +137,7 @@ impl Resource for ResMEM {
         };
 
         let formatted_used_mem = convert_storage(used_mem as f64, false);
+        let formatted_available_mem = convert_storage(available_mem as f64, false);
         let formatted_total_mem = convert_storage(total_mem as f64, false);
 
         let formatted_used_swap = if total_swap > 0 {
@@ -146,6 +154,8 @@ impl Resource for ResMEM {
         self.mem_usage_percent.replace(memory_fraction);
         self.usage_history.insert_at_first(memory_fraction);
         self.formatted_used_mem.replace(formatted_used_mem);
+        self.formatted_available_mem
+            .replace(formatted_available_mem);
         self.formatted_total_mem.replace(formatted_total_mem);
 
         self.swap_usage_percent.replace(swap_fraction);
@@ -177,7 +187,7 @@ impl Resource for ResMEM {
                 1.,
                 0.,
                 3,
-                ratatui::style::Color::Magenta,
+                ratatui::style::Color::Black,
             ))
             .active(args.focused)
             .build("Memory")?;
@@ -191,13 +201,14 @@ impl Resource for ResMEM {
 
         let usage = GroupedLines::builder(width, &self.theme)
             .kv_sep("Memory", self.mem_usage().as_str())
+            .kv_sep("Available", self.formatted_available_mem.or_nan_owned())
             .lines(ls_history_graph(
                 width - 2,
                 &self.usage_history,
                 1.,
                 0.,
                 3,
-                ratatui::style::Color::Magenta,
+                ratatui::style::Color::Black,
             ));
 
         let usage = if self.formatted_total_swap.is_some() && self.formatted_used_swap.is_some() {
@@ -210,7 +221,7 @@ impl Resource for ResMEM {
                     1.,
                     0.,
                     3,
-                    ratatui::style::Color::Cyan,
+                    ratatui::style::Color::Black,
                 ))
         } else {
             usage
@@ -262,5 +273,31 @@ impl Resource for ResMEM {
 
     fn get_name(&self) -> String {
         "".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_compact_usage;
+
+    #[test]
+    fn compact_usage_never_renders_nan() {
+        for label in [
+            format_compact_usage(None, None),
+            format_compact_usage(None, Some(f64::NAN)),
+            format_compact_usage(Some("1.0 GiB"), Some(f64::NAN)),
+            format_compact_usage(Some("1.0 GiB"), Some(f32::NAN as f64)),
+        ] {
+            assert!(!label.contains("NaN"), "got {label}");
+            assert!(label.contains("N/A"), "got {label}");
+        }
+    }
+
+    #[test]
+    fn compact_usage_formats_fraction_as_percent() {
+        let label = format_compact_usage(Some("1.0 GiB"), Some(0.5));
+        assert!(label.contains("50"));
+        assert!(!label.contains("0.5 %"));
+        assert!(!label.contains("NaN"));
     }
 }

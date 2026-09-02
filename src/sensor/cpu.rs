@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use chin_tools::AResult;
 use glob::glob;
 use once_cell::sync::Lazy;
@@ -25,10 +25,6 @@ static RE_LSCPU_VIRTUALIZATION: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"Virtualization:\s*(.*)").unwrap());
 
 static RE_LSCPU_MAX_MHZ: Lazy<Regex> = Lazy::new(|| Regex::new(r"CPU max MHz:\s*(.*)").unwrap());
-
-static RE_PROC_STAT: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"cpu[0-9]* *(?P<user>[0-9]*) *(?P<nice>[0-9]*) *(?P<system>[0-9]*) *(?P<idle>[0-9]*) *(?P<iowait>[0-9]*) *(?P<irq>[0-9]*) *(?P<softirq>[0-9]*) *(?P<steal>[0-9]*) *(?P<guest>[0-9]*) *(?P<guest_nice>[0-9]*)").unwrap()
-});
 
 static CPU_TEMPERATURE_PATH: Lazy<Option<PathBuf>> = Lazy::new(|| {
     let cpu_temperature_path =
@@ -83,33 +79,35 @@ pub struct CpuData {
     pub new_total_usage: (u64, u64),
     pub new_thread_usages: Vec<(u64, u64)>,
     pub temperature: Option<f32>,
-    pub frequencies: Vec<Option<u64>>,
+    pub frequency: Option<u64>,
 }
 
 impl CpuData {
     pub fn fetch(logical_cpus: usize) -> AResult<Self> {
-        let new_total_usage = get_cpu_usage(None)?;
+        // Single /proc/stat read for all cores (was N+1 full-file reads).
+        let (new_total_usage, new_thread_usages) = read_all_cpu_usages(logical_cpus)?;
 
         let temperature = get_temperature().ok();
 
-        let mut frequencies = Vec::with_capacity(logical_cpus);
-        let mut new_thread_usages = Vec::with_capacity(logical_cpus);
-
-        for i in 0..logical_cpus {
-            let smth = get_cpu_usage(Some(i))?;
-            new_thread_usages.push(smth);
-
-            let freq = get_cpu_freq(i).ok();
-            frequencies.push(freq);
-        }
+        // 2026-09-02 representative-cpu-frequency
+        // Reading every logical CPU's sysfs file dominated sensor-worker wakeups.
+        // A first-available sample matches btop's low-cost `freq_mode=first` model.
+        let frequency = first_available_cpu_frequency(logical_cpus, get_cpu_freq);
 
         Ok(Self {
             new_total_usage,
             new_thread_usages,
             temperature,
-            frequencies,
+            frequency,
         })
     }
+}
+
+fn first_available_cpu_frequency(
+    logical_cpus: usize,
+    mut read_frequency: impl FnMut(usize) -> Result<u64>,
+) -> Option<u64> {
+    (0..logical_cpus).find_map(|core| read_frequency(core).ok())
 }
 
 #[derive(Debug, Clone, Default)]
@@ -217,48 +215,73 @@ pub fn get_cpu_freq(core: usize) -> Result<u64> {
         "/sys/devices/system/cpu/cpu{core}/cpufreq/scaling_cur_freq"
     ))
     .with_context(|| format!("unable to read scaling_cur_freq for core {core}"))?
-    .replace('\n', "")
+    .trim()
     .parse::<u64>()
     .context("can't parse scaling_cur_freq to usize")
     .map(|x| x * 1000)
 }
 
-fn parse_proc_stat_line<S: AsRef<str>>(line: S) -> Result<(u64, u64)> {
-    let captures = RE_PROC_STAT
-        .captures(line.as_ref())
-        .ok_or_else(|| anyhow!("using regex to parse /proc/stat failed"))?;
-    let idle_time = captures
-        .name("idle")
-        .and_then(|x| x.as_str().parse::<u64>().ok())
-        .ok_or_else(|| anyhow!("unable to get idle time"))?
-        + captures
-            .name("iowait")
-            .and_then(|x| x.as_str().parse::<u64>().ok())
-            .ok_or_else(|| anyhow!("unable to get iowait time"))?;
-    let sum = captures
-        .iter()
-        .skip(1)
-        .flat_map(|cap| {
-            cap.and_then(|x| x.as_str().parse::<u64>().ok())
-                .ok_or_else(|| anyhow!("unable to sum CPU times from /proc/stat"))
-        })
-        .sum();
+/// Parse one `/proc/stat` cpu line into `(idle_time, total_time)`.
+/// Layout: cpuN user nice system idle iowait irq softirq steal guest guest_nice
+fn parse_proc_stat_line(line: &str) -> Result<(u64, u64)> {
+    let mut parts = line.split_whitespace();
+    let _label = parts.next().context("empty /proc/stat line")?;
+
+    let mut values = [0u64; 10];
+    let mut count = 0usize;
+    for (slot, token) in values.iter_mut().zip(parts) {
+        *slot = token
+            .parse::<u64>()
+            .context("unable to parse CPU times from /proc/stat")?;
+        count += 1;
+    }
+    if count < 4 {
+        bail!("not enough fields in /proc/stat cpu line");
+    }
+
+    // idle + iowait (fields 4 and 5, 0-indexed 3 and 4)
+    let idle_time = values[3].saturating_add(values[4]);
+    let sum: u64 = values[..count].iter().sum();
     Ok((idle_time, sum))
 }
 
-fn get_proc_stat(core: Option<usize>) -> Result<String> {
-    // the combined stats are in line 0, the other cores are in the following lines,
-    // since our `core` argument starts with 0, we must add 1 to it if it's not `None`.
-    let selected_line_number = core.map_or(0, |x| x + 1);
-    let proc_stat_raw =
-        std::fs::read_to_string("/proc/stat").context("unable to read /proc/stat")?;
-    let mut proc_stat = proc_stat_raw.split('\n').collect::<Vec<&str>>();
-    proc_stat.retain(|x| x.starts_with("cpu"));
-    // return an `Error` if `core` is greater than the number of cores
-    if selected_line_number >= proc_stat.len() {
-        bail!("`core` argument greater than amount of cores")
+/// Read `/proc/stat` once and return total + per-core usage.
+fn read_all_cpu_usages(logical_cpus: usize) -> Result<((u64, u64), Vec<(u64, u64)>)> {
+    let proc_stat = std::fs::read_to_string("/proc/stat").context("unable to read /proc/stat")?;
+
+    let mut total = None;
+    let mut threads = Vec::with_capacity(logical_cpus);
+
+    for line in proc_stat.lines() {
+        if !line.starts_with("cpu") {
+            // All cpu* lines are at the top; stop once we leave them.
+            if total.is_some() {
+                break;
+            }
+            continue;
+        }
+
+        // "cpu " (aggregate) vs "cpu0", "cpu1", ...
+        let after_cpu = &line[3..];
+        if after_cpu.starts_with(' ') || after_cpu.starts_with('\t') {
+            total = Some(parse_proc_stat_line(line)?);
+        } else if after_cpu.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+            if threads.len() < logical_cpus {
+                threads.push(parse_proc_stat_line(line)?);
+            }
+        }
     }
-    Ok(proc_stat[selected_line_number].to_string())
+
+    let total = total.context("missing aggregate cpu line in /proc/stat")?;
+    if threads.len() < logical_cpus {
+        bail!(
+            "expected {logical_cpus} cpu cores in /proc/stat, got {}",
+            threads.len()
+        );
+    }
+    threads.truncate(logical_cpus);
+
+    Ok((total, threads))
 }
 
 /// Returns the CPU usage of either all cores combined (if supplied argument is `None`),
@@ -270,8 +293,17 @@ fn get_proc_stat(core: Option<usize>) -> Result<String> {
 ///
 /// Will return `Err` if the are problems during reading or parsing
 /// of /proc/stat
+#[allow(dead_code)]
 pub fn get_cpu_usage(core: Option<usize>) -> Result<(u64, u64)> {
-    parse_proc_stat_line(get_proc_stat(core)?)
+    let n = core.map_or(0, |c| c + 1);
+    let (total, threads) = read_all_cpu_usages(n.max(1))?;
+    match core {
+        None => Ok(total),
+        Some(i) => threads
+            .into_iter()
+            .nth(i)
+            .context("`core` argument greater than amount of cores"),
+    }
 }
 
 /// Returns the CPU temperature.
@@ -292,8 +324,50 @@ fn read_sysfs_thermal<P: AsRef<Path>>(path: P) -> Result<f32> {
     let temp_string = std::fs::read_to_string(path)
         .with_context(|| format!("unable to read {}", path.display()))?;
     temp_string
-        .replace('\n', "")
+        .trim()
         .parse::<f32>()
         .with_context(|| format!("unable to parse {}", path.display()))
         .map(|t| t / 1000f32)
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::anyhow;
+
+    use super::first_available_cpu_frequency;
+
+    #[test]
+    fn representative_frequency_stops_after_first_success() {
+        let mut attempts = Vec::new();
+        let frequency = first_available_cpu_frequency(4, |core| {
+            attempts.push(core);
+            Ok(2_400_000_000 + core as u64)
+        });
+
+        assert_eq!(frequency, Some(2_400_000_000));
+        assert_eq!(attempts, vec![0]);
+    }
+
+    #[test]
+    fn representative_frequency_skips_unavailable_cores() {
+        let mut attempts = Vec::new();
+        let frequency = first_available_cpu_frequency(4, |core| {
+            attempts.push(core);
+            if core < 2 {
+                Err(anyhow!("offline"))
+            } else {
+                Ok(1_800_000_000)
+            }
+        });
+
+        assert_eq!(frequency, Some(1_800_000_000));
+        assert_eq!(attempts, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn zero_logical_cpus_does_not_read_frequency() {
+        let frequency = first_available_cpu_frequency(0, |_| panic!("reader must not run"));
+
+        assert_eq!(frequency, None);
+    }
 }

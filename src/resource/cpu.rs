@@ -11,16 +11,37 @@ use crate::{
         stateful_lines::{StatefulGroupedLines, StatefulLinesType},
         PaddingH,
     },
-    ring::Ring,
+    ring::{Ring, DEFAULT_HISTORY_LEN, SHORT_HISTORY_LEN},
     sensor::{
         cpu::{cpu_info, CpuData, CpuInfo},
         units::{convert_frequency, convert_temperature},
     },
-    tarits::{NaNDefault, None2NaN, None2NaNDef},
+    tarits::{format_percent_label, None2NaN, None2NaNDef},
     view::{theme::SharedTheme, BlockArg, DetailArg},
 };
 
 use super::{Resource, SensorResultType, SensorRsp};
+
+/// Consecutive-sample CPU usage on a 0–100 scale.
+/// Previous `(0, 0)` is "no sample yet". A zero counter delta is 0, never a
+/// since-boot lifetime average and never a non-finite value.
+pub(crate) fn cpu_delta_percent(new: (u64, u64), old: (u64, u64)) -> f64 {
+    if old == (0, 0) {
+        return 0.0;
+    }
+    let idle_delta = new.0.saturating_sub(old.0);
+    let sum_delta = new.1.saturating_sub(old.1);
+    if sum_delta == 0 {
+        return 0.0;
+    }
+    let work_time = sum_delta.saturating_sub(idle_delta);
+    let fraction = (work_time as f64) / (sum_delta as f64);
+    if !fraction.is_finite() {
+        0.0
+    } else {
+        (fraction * 100.0).clamp(0.0, 100.0)
+    }
+}
 
 #[derive(Debug)]
 pub struct ResCPU {
@@ -36,7 +57,7 @@ pub struct ResCPU {
     total_history: Ring<f64>,
     thread_history: Vec<Ring<f64>>,
 
-    frequences: Option<Vec<Option<u64>>>,
+    frequency: Option<u64>,
     tempurature: Option<f32>,
     viewer_state: StatefulGroupedLines<'static>,
 }
@@ -53,11 +74,11 @@ impl ResCPU {
             old_total_usage: Cell::default(),
             old_thread_usages: RefCell::default(),
             logical_cpus_amount: Cell::new(logic_size),
-            total_history: Ring::new(1000).name("CCPU"),
+            total_history: Ring::new(DEFAULT_HISTORY_LEN).name("CCPU"),
             theme,
             tempurature: None,
             thread_history: vec![],
-            frequences: None,
+            frequency: None,
             viewer_state: Default::default(),
         })
     }
@@ -82,54 +103,39 @@ impl Resource for ResCPU {
     }
 
     fn update_data(&mut self, data: &Self::Rsp) {
-        fn delta_percent(new: &(u64, u64), old: &(u64, u64)) -> f64 {
-            let idle_delta = new.0.saturating_sub(old.0);
-            let sum_delta = new.1.saturating_sub(old.1);
-            let work_time = sum_delta.saturating_sub(idle_delta);
-
-            let fraction = ((work_time as f64) / (sum_delta as f64)).nan_default(0.0);
-
-            fraction * 100.
-        }
-
         let CpuData {
             new_total_usage,
             new_thread_usages,
             temperature,
-            frequencies,
+            frequency,
         } = data;
 
         if self.thread_history.len() != new_thread_usages.len() {
-            self.thread_history = new_thread_usages.iter().map(|_| Ring::new(300)).collect();
+            self.thread_history = new_thread_usages
+                .iter()
+                .map(|_| Ring::new(SHORT_HISTORY_LEN))
+                .collect();
         }
 
-        let total_percentage = delta_percent(new_total_usage, &self.old_total_usage.get());
-        self.old_thread_usages
-            .borrow()
-            .iter()
-            .enumerate()
-            .map(|(index, old)| {
-                (
-                    index,
-                    new_thread_usages
-                        .get(index)
-                        .map(|new| delta_percent(new, old)),
-                )
-            })
-            .for_each(|(index, percentage)| {
-                if let Some(history) = self.thread_history.get_mut(index) {
-                    if let Some(percentage) = percentage {
-                        history.insert_at_first(percentage);
-                    }
+        let total_percentage = cpu_delta_percent(*new_total_usage, self.old_total_usage.get());
+        {
+            let old = self.old_thread_usages.borrow();
+            for (index, old_usage) in old.iter().enumerate() {
+                if let (Some(new), Some(history)) = (
+                    new_thread_usages.get(index),
+                    self.thread_history.get_mut(index),
+                ) {
+                    history.insert_at_first(cpu_delta_percent(*new, *old_usage));
                 }
-            });
+            }
+        }
 
         self.total_history.insert_at_first(total_percentage);
 
         self.old_total_usage.set(*new_total_usage);
-        self.old_thread_usages.replace(new_thread_usages.clone());
+        *self.old_thread_usages.borrow_mut() = new_thread_usages.clone();
         self.tempurature = *temperature;
-        self.frequences.replace(frequencies.clone());
+        self.frequency = *frequency;
     }
 
     fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
@@ -141,9 +147,14 @@ impl Resource for ResCPU {
                     "{}  {}",
                     self.total_history
                         .newest()
-                        .or_nan(|e| format!("{:.1} %", e)),
+                        .or_nan(|e| format_percent_label(**e)),
                     self.tempurature.or_nan(|e| convert_temperature(*e as f64))
                 ),
+            )
+            .kv(
+                "Freq",
+                self.frequency
+                    .or_nan(|frequency| convert_frequency(*frequency as f64)),
             )
             .lines(ls_history_graph(
                 width,
@@ -151,7 +162,7 @@ impl Resource for ResCPU {
                 100.,
                 0.,
                 3,
-                ratatui::style::Color::Red,
+                ratatui::style::Color::Black,
             ))
             .active(args.focused)
             .build("CPU")?;
@@ -177,23 +188,22 @@ impl Resource for ResCPU {
                         100.,
                         0.,
                         1,
-                        ratatui::style::Color::Red,
+                        ratatui::style::Color::Black,
                     )
                     .padding(),
                     ring.newest(),
-                    match self.frequences.as_ref().map(|e| e.get(id)) {
-                        Some(Some(Some(o))) => Some(o),
-                        _ => None,
-                    },
                 )
             })
-            .map(|(index, mut spans, newest, freq)| {
+            .map(|(index, mut spans, newest)| {
                 Line::from({
                     spans.insert(0, Span::raw(format!("{:02}", index)));
-                    spans.push(Span::raw(
-                        freq.or_nan(|e| format!("{:.1}G ", (**e as f64) / 1e9)),
-                    ));
-                    spans.push(Span::raw(newest.or_nan(|e| format!("{:<.0}%", **e))));
+                    spans.push(Span::raw(newest.or_nan(|e| {
+                        if e.is_finite() {
+                            format!("{:<.0}%", **e)
+                        } else {
+                            "N/A".to_owned()
+                        }
+                    })));
                     spans
                 })
             })
@@ -209,6 +219,11 @@ impl Resource for ResCPU {
             .kv_sep(
                 "Temperature",
                 self.tempurature.or_nan(|e| convert_temperature(*e as f64)),
+            )
+            .kv_sep(
+                "Sampled Frequency",
+                self.frequency
+                    .or_nan(|frequency| convert_frequency(*frequency as f64)),
             )
             .active(args.active);
 
@@ -261,5 +276,25 @@ impl Resource for ResCPU {
 
     fn get_name(&self) -> String {
         "".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cpu_delta_percent;
+
+    #[test]
+    fn missing_previous_or_equal_samples_are_zero_not_lifetime() {
+        // Previous (0, 0) would otherwise be a since-boot average of 50%.
+        assert_eq!(cpu_delta_percent((50, 100), (0, 0)), 0.0);
+        assert_eq!(cpu_delta_percent((100, 200), (100, 200)), 0.0);
+        assert_eq!(cpu_delta_percent((0, 0), (0, 0)), 0.0);
+    }
+
+    #[test]
+    fn consecutive_delta_is_percent_on_0_to_100() {
+        // idle 50 of 100 ticks busy → 50%.
+        assert_eq!(cpu_delta_percent((150, 300), (100, 200)), 50.0);
+        assert!(cpu_delta_percent((150, 300), (100, 200)).is_finite());
     }
 }

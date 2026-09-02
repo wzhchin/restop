@@ -232,8 +232,8 @@ impl NetworkInterface {
 
         let sysfs_path_clone = sysfs_path.to_owned();
         let speed = std::fs::read_to_string(sysfs_path_clone.join("speed"))
-            .map(|x| x.parse().unwrap_or_default())
-            .ok();
+            .ok()
+            .and_then(|value| value.trim().parse().ok());
 
         let sysfs_path_clone = sysfs_path.to_owned();
         let device_name = std::fs::read_to_string(sysfs_path_clone.join("device/label"))

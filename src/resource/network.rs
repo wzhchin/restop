@@ -9,7 +9,7 @@ use crate::{
         ls_history_graph,
         stateful_lines::{StatefulGroupedLines, StatefulLinesType},
     },
-    ring::Ring,
+    ring::{Ring, DEFAULT_HISTORY_LEN},
     sensor::{
         network::{NetworkData, NetworkInterface},
         units::{convert_speed, convert_storage},
@@ -61,8 +61,8 @@ impl ResNetwork {
                 highest_sent_speed: Default::default(),
                 received_speed: None,
                 sent_speed: None,
-                sendhistory: Ring::new(1000),
-                receive_history: Ring::new(1000),
+                sendhistory: Ring::new(DEFAULT_HISTORY_LEN),
+                receive_history: Ring::new(DEFAULT_HISTORY_LEN),
                 viewer_state: Default::default(),
             })
             .collect();
@@ -81,7 +81,7 @@ impl Resource for ResNetwork {
     type Rsp = NetworkData;
 
     fn get_id(&self) -> &str {
-        self.info.hw_address.as_ref().map_or("", |e| e)
+        self.info.sysfs_path.to_str().unwrap_or("")
     }
 
     fn get_req(&self) -> Self::Req {
@@ -184,7 +184,7 @@ impl Resource for ResNetwork {
                 self.highest_sent_speed.get(),
                 0.,
                 3,
-                ratatui::style::Color::Yellow,
+                ratatui::style::Color::Black,
             ))
             .lines(ls_history_graph(
                 width,
@@ -192,7 +192,7 @@ impl Resource for ResNetwork {
                 self.highest_received_speed.get(),
                 0.,
                 3,
-                ratatui::style::Color::Blue,
+                ratatui::style::Color::Black,
             ))
             .active(args.focused)
             .build(format!(
@@ -234,7 +234,7 @@ impl Resource for ResNetwork {
                 self.highest_received_speed.get(),
                 0.,
                 3,
-                ratatui::style::Color::Blue,
+                ratatui::style::Color::Black,
             ))
             .kv_sep(
                 "Sending",
@@ -246,7 +246,7 @@ impl Resource for ResNetwork {
                 self.highest_sent_speed.get(),
                 0.,
                 3,
-                ratatui::style::Color::Yellow,
+                ratatui::style::Color::Black,
             ))
             .kv_sep(
                 "Total Received",
@@ -266,7 +266,19 @@ impl Resource for ResNetwork {
 
         let props = GroupedLines::builder(width, &self.theme)
             .kv_sep("Sys Path", self.info.sysfs_path.to_str().or_nan_def())
-            .kv_sep("Conection Type", self.info.interface_type.to_string())
+            .kv_sep("Connection Type", self.info.interface_type.to_string())
+            .kv_sep(
+                "Link Speed",
+                self.info.speed.or_nan(|speed| format!("{speed} Mb/s")),
+            )
+            .kv_sep(
+                "Interface Kind",
+                if self.info.is_virtual() {
+                    "Virtual"
+                } else {
+                    "Physical"
+                },
+            )
             .kv_sep("Manufacturer", self.info.vendor.or_unk_def())
             .kv_sep("Driver Used", self.info.driver_name.or_unk_def())
             .kv_sep("Interface", self.interface().as_str())
@@ -290,5 +302,59 @@ impl Resource for ResNetwork {
 
     fn get_name(&self) -> String {
         self.info.get_name()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{path::PathBuf, sync::Arc};
+
+    use crate::{
+        resource::{ResourceType, SensorRsp},
+        sensor::network::{NetworkData, NetworkInterface},
+        view::theme::Theme,
+    };
+
+    use super::ResNetwork;
+
+    fn network_resource() -> ResNetwork {
+        let mut info = NetworkInterface::default();
+        info.hw_address = Some("00:11:22:33:44:55".to_owned());
+        info.sysfs_path = PathBuf::from("/sys/class/net/test0");
+        ResNetwork {
+            info: Arc::new(info),
+            last_timestamp: None,
+            old_received_bytes: None,
+            old_sent_bytes: None,
+            highest_received_speed: Default::default(),
+            highest_sent_speed: Default::default(),
+            received_speed: None,
+            sent_speed: None,
+            theme: Arc::new(Theme::default()),
+            sendhistory: crate::ring::Ring::new(crate::ring::DEFAULT_HISTORY_LEN),
+            receive_history: crate::ring::Ring::new(crate::ring::DEFAULT_HISTORY_LEN),
+            viewer_state: Default::default(),
+        }
+    }
+
+    #[test]
+    fn network_sample_matches_resource_by_sysfs_path() {
+        let mut resource = ResourceType::Network(network_resource());
+        let response = SensorRsp::Network(NetworkData {
+            sysfs_path: "/sys/class/net/test0".to_owned(),
+            hw_address: Some("00:11:22:33:44:55".to_owned()),
+            is_virtual: false,
+            received_bytes: Ok(10),
+            sent_bytes: Ok(20),
+            display_name: "test0".to_owned(),
+        });
+
+        assert!(resource.updata_data(&response));
+
+        let ResourceType::Network(resource) = resource else {
+            unreachable!();
+        };
+        assert_eq!(resource.old_received_bytes, Some(10));
+        assert_eq!(resource.old_sent_bytes, Some(20));
     }
 }

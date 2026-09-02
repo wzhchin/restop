@@ -33,15 +33,6 @@ static RE_TYPE_DETAIL: Lazy<Regex> = Lazy::new(|| Regex::new(r"Type Detail: (.+)
 
 static RE_SIZE: Lazy<Regex> = Lazy::new(|| Regex::new(r"Size: (\d+) GB").unwrap());
 
-static RE_MEM_TOTAL: Lazy<Regex> = Lazy::new(|| Regex::new(r"MemTotal:\s*(\d*) kB").unwrap());
-
-static RE_MEM_AVAILABLE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"MemAvailable:\s*(\d*) kB").unwrap());
-
-static RE_SWAP_TOTAL: Lazy<Regex> = Lazy::new(|| Regex::new(r"SwapTotal:\s*(\d*) kB").unwrap());
-
-static RE_SWAP_FREE: Lazy<Regex> = Lazy::new(|| Regex::new(r"SwapFree:\s*(\d*) kB").unwrap());
-
 static RE_NUM_MEMORY_DEVICES: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"MEMORY_ARRAY_NUM_DEVICES=(\d*)").unwrap());
 
@@ -58,75 +49,45 @@ impl MemoryData {
         let proc_mem =
             std::fs::read_to_string("/proc/meminfo").context("unable to read /proc/meminfo")?;
 
-        let total_mem = RE_MEM_TOTAL
-            .captures(&proc_mem)
-            .context("RE_MEM_TOTAL no captures")
-            .and_then(|captures| {
-                captures
-                    .get(1)
-                    .context("RE_MEM_TOTAL not enough captures")
-                    .and_then(|capture| {
-                        capture
-                            .as_str()
-                            .parse::<usize>()
-                            .context("unable to parse MemTotal")
-                            .map(|int| int * 1024)
-                    })
-            })?;
+        // Single pass over meminfo instead of four full-file regex scans.
+        let mut total_mem = None;
+        let mut available_mem = None;
+        let mut total_swap = None;
+        let mut free_swap = None;
 
-        let available_mem = RE_MEM_AVAILABLE
-            .captures(&proc_mem)
-            .context("RE_MEM_AVAILABLE no captures")
-            .and_then(|captures| {
-                captures
-                    .get(1)
-                    .context("RE_MEM_AVAILABLE not enough captures")
-                    .and_then(|capture| {
-                        capture
-                            .as_str()
-                            .parse::<usize>()
-                            .context("unable to parse MemAvailable")
-                            .map(|int| int * 1024)
-                    })
-            })?;
-
-        let total_swap = RE_SWAP_TOTAL
-            .captures(&proc_mem)
-            .context("RE_SWAP_TOTAL no captures")
-            .and_then(|captures| {
-                captures
-                    .get(1)
-                    .context("RE_SWAP_TOTAL not enough captures")
-                    .and_then(|capture| {
-                        capture
-                            .as_str()
-                            .parse::<usize>()
-                            .context("unable to parse SwapTotal")
-                            .map(|int| int * 1024)
-                    })
-            })?;
-
-        let free_swap = RE_SWAP_FREE
-            .captures(&proc_mem)
-            .context("RE_SWAP_FREE no captures")
-            .and_then(|captures| {
-                captures
-                    .get(1)
-                    .context("RE_SWAP_FREE not enough captures")
-                    .and_then(|capture| {
-                        capture
-                            .as_str()
-                            .parse::<usize>()
-                            .context("unable to parse SwapFree")
-                            .map(|int| int * 1024)
-                    })
-            })?;
+        for line in proc_mem.lines() {
+            let mut parts = line.split_whitespace();
+            let Some(key) = parts.next() else {
+                continue;
+            };
+            let Some(value) = parts.next() else {
+                continue;
+            };
+            let Ok(kb) = value.parse::<usize>() else {
+                continue;
+            };
+            let bytes = kb * 1024;
+            match key {
+                "MemTotal:" => total_mem = Some(bytes),
+                "MemAvailable:" => available_mem = Some(bytes),
+                "SwapTotal:" => total_swap = Some(bytes),
+                "SwapFree:" => free_swap = Some(bytes),
+                _ => {}
+            }
+            if total_mem.is_some()
+                && available_mem.is_some()
+                && total_swap.is_some()
+                && free_swap.is_some()
+            {
+                break;
+            }
+        }
 
         Ok(Self {
-            total_mem,
-            available_mem,
-            total_swap,
-            free_swap,
+            total_mem: total_mem.context("MemTotal missing in /proc/meminfo")?,
+            available_mem: available_mem.context("MemAvailable missing in /proc/meminfo")?,
+            total_swap: total_swap.context("SwapTotal missing in /proc/meminfo")?,
+            free_swap: free_swap.context("SwapFree missing in /proc/meminfo")?,
         })
     }
 }
