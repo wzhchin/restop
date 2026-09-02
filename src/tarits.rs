@@ -107,6 +107,29 @@ where
     }
 }
 
+/// Format a 0–100 percent with one decimal and a `%` suffix. Non-finite → `N/A`.
+pub fn format_percent_label(percent: f64) -> String {
+    if percent.is_finite() {
+        format!("{:.1} %", percent)
+    } else {
+        "N/A".to_owned()
+    }
+}
+
+/// Format a 0–1 fraction as a percent label. Non-finite values are `N/A`.
+pub fn format_fraction_as_percent(fraction: f64) -> String {
+    format_percent_label(fraction * 100.0)
+}
+
+/// Format a 0–100 percent number with one decimal. Non-finite values are `N/A`.
+pub fn format_percent_number(percent: f64) -> String {
+    if percent.is_finite() {
+        format!("{:.1}", percent)
+    } else {
+        "N/A".to_owned()
+    }
+}
+
 pub trait NaNDefault {
     /// Returns the given `default` value if the variable is NaN,
     /// and returns itself otherwise.
@@ -148,6 +171,33 @@ impl PathString for PathBuf {
         match self.file_name() {
             Some(path) => path.to_string_lossy().to_string(),
             None => "<None>".to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_fraction_as_percent, format_percent_label, format_percent_number};
+
+    #[test]
+    fn fraction_0_5_formats_as_50_percent() {
+        assert_eq!(format_fraction_as_percent(0.5), "50.0 %");
+        assert!(!format_fraction_as_percent(0.5).contains("0.5 %"));
+        assert_eq!(format_percent_label(50.0), "50.0 %");
+    }
+
+    #[test]
+    fn percent_formatters_never_emit_nan() {
+        for label in [
+            format_fraction_as_percent(f64::NAN),
+            format_fraction_as_percent(f32::NAN as f64),
+            format_percent_label(f64::NAN),
+            format_percent_label(f32::NAN as f64),
+            format_percent_number(f64::NAN),
+            format_percent_number(f32::NAN as f64),
+        ] {
+            assert!(!label.contains("NaN"), "got {label}");
+            assert_eq!(label, "N/A");
         }
     }
 }

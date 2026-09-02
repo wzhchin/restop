@@ -113,6 +113,9 @@ pub fn convert_temperature(celsius: f64) -> String {
 }
 
 pub fn convert_storage(bytes: f64, integer: bool) -> String {
+    if !bytes.is_finite() {
+        return "N/A".to_owned();
+    }
     match SETTINGS.base() {
         Base::Decimal => convert_storage_decimal(bytes, integer),
         Base::Binary => convert_storage_binary(bytes, integer),
@@ -242,6 +245,9 @@ pub fn conver_storage_width4(bytes: f64) -> String {
 }
 
 pub fn convert_speed(bytes_per_second: f64, network: bool) -> String {
+    if !bytes_per_second.is_finite() {
+        return "N/A".to_owned();
+    }
     match SETTINGS.base() {
         Base::Decimal => {
             if network && SETTINGS.network_bits() {
@@ -398,7 +404,7 @@ pub fn convert_energy(watthours: f64, integer: bool) -> String {
 
 #[cfg(test)]
 mod test {
-    use crate::sensor::units::convert_seconds;
+    use crate::sensor::units::{convert_seconds, convert_speed, convert_storage};
 
     #[test]
     fn test_convert_seconds() {
@@ -408,5 +414,20 @@ mod test {
         println!("{}", convert_seconds(200));
         println!("{}", convert_seconds(231));
         println!("{}", convert_seconds(1002));
+    }
+
+    #[test]
+    fn speed_and_storage_never_emit_nan() {
+        for label in [
+            convert_speed(f64::NAN, false),
+            convert_speed(f64::NAN, true),
+            convert_speed(f32::NAN as f64, false),
+            convert_storage(f64::NAN, false),
+            convert_storage(f64::NAN, true),
+            convert_storage(f32::NAN as f64, false),
+        ] {
+            assert!(!label.contains("NaN"), "got {label}");
+            assert_eq!(label, "N/A");
+        }
     }
 }
