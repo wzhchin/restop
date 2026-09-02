@@ -8,8 +8,8 @@ edition = "2021"
 opt-level = 1
 
 [profile.release]
-lto = "fat"
-debug = true
+lto = "thin"
+debug = false 
 incremental = true
 
 [dependencies]

@@ -1,0 +1,29 @@
+pkgname=restop
+# Cargo permits '-' in versions; Arch pkgver does not.
+pkgver=0.0.1.r241031
+pkgrel=1
+pkgdesc='A terminal system monitor'
+arch=('x86_64')
+url='https://github.com/aeghn/restop'
+license=('GPL-3.0-or-later')
+depends=('gcc-libs' 'glibc')
+makedepends=('cargo')
+options=('!debug')
+source=()
+sha256sums=()
+
+build() {
+    local source_dir="$startdir/../.."
+
+    cd "$source_dir"
+    cargo build --release --locked --target-dir "$source_dir/target"
+}
+
+package() {
+    local source_dir="$startdir/../.."
+
+    install -Dm755 "$source_dir/target/release/restop" \
+        "$pkgdir/usr/bin/restop"
+    install -Dm644 "$source_dir/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
