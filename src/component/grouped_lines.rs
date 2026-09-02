@@ -1,15 +1,87 @@
 use chin_tools::AResult;
 use ratatui::{
+    buffer::Buffer,
     layout::Rect,
-    style::Stylize,
+    style::{Style, Stylize},
     symbols::line::*,
     text::{Line, Span},
     widgets::Widget,
 };
 
-use crate::view::theme::SharedTheme;
+use crate::view::theme::{SharedTheme, Theme};
 
 use super::{ls_common, ls_kv, s_label};
+
+#[derive(Clone, Copy, Debug)]
+struct Border {
+    top_left: &'static str,
+    top_right: &'static str,
+    top_horizontal: &'static str,
+    horizontal: &'static str,
+    vertical: &'static str,
+    bottom_left: &'static str,
+    bottom_right: &'static str,
+    style: Style,
+}
+
+impl Border {
+    fn new(focused: bool) -> Self {
+        Self::styled(focused, Theme::default().border(focused))
+    }
+
+    fn styled(focused: bool, style: Style) -> Self {
+        macro_rules! fcs {
+            ($when_focused:expr, $when_unfocused:expr) => {
+                if focused {
+                    $when_focused
+                } else {
+                    $when_unfocused
+                }
+            };
+        }
+
+        Self {
+            top_left: fcs!(DOUBLE_TOP_LEFT, TOP_LEFT),
+            top_right: fcs!(DOUBLE_TOP_RIGHT, TOP_RIGHT),
+            top_horizontal: fcs!(DOUBLE_HORIZONTAL, HORIZONTAL),
+            horizontal: fcs!(DOUBLE_HORIZONTAL, HORIZONTAL),
+            vertical: fcs!(DOUBLE_VERTICAL, VERTICAL),
+            bottom_left: fcs!(DOUBLE_BOTTOM_LEFT, BOTTOM_LEFT),
+            bottom_right: fcs!(DOUBLE_BOTTOM_RIGHT, BOTTOM_RIGHT),
+            style,
+        }
+    }
+
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let top = area.top();
+        let right = area.right().saturating_sub(1);
+        let bottom = area.bottom().saturating_sub(1);
+        let left = area.left();
+        let style = self.style;
+
+        buf.set_string(left, top, self.top_left, style);
+        buf.set_string(right, top, self.top_right, style);
+        buf.set_string(left, bottom, self.bottom_left, style);
+        buf.set_string(right, bottom, self.bottom_right, style);
+
+        for x in left.saturating_add(1)..right {
+            buf.set_string(x, top, self.top_horizontal, style);
+            buf.set_string(x, bottom, self.horizontal, style);
+        }
+        for y in top.saturating_add(1)..bottom {
+            buf.set_string(left, y, self.vertical, style);
+            buf.set_string(right, y, self.vertical, style);
+        }
+    }
+}
+
+pub fn render_border(focused: bool, area: Rect, buf: &mut Buffer) {
+    Border::new(focused).render(area, buf);
+}
 
 #[derive(Clone, Debug)]
 pub struct GroupedLines<'a> {
@@ -84,21 +156,9 @@ impl<'a> Widget for GroupedLines<'a> {
         let start = self.start.unwrap_or(0);
         let end = self.end.unwrap_or(u16::MAX);
 
-        let fg = self.theme.fg();
-
         let offset = start;
-
-        let tl = if self.focused { "╒" } else { TOP_LEFT };
-        let tr = if self.focused { "╕" } else { TOP_RIGHT };
-        let thor = if self.focused {
-            DOUBLE_HORIZONTAL
-        } else {
-            HORIZONTAL
-        };
-        let hor = HORIZONTAL;
-        let ver = VERTICAL;
-        let bl = BOTTOM_LEFT;
-        let br = BOTTOM_RIGHT;
+        let border = Border::styled(self.focused, self.theme.border(self.focused));
+        let border_style = border.style;
 
         for i in start..end {
             if i.saturating_sub(start) > area.height {
@@ -109,7 +169,7 @@ impl<'a> Widget for GroupedLines<'a> {
 
             if i == 0 {
                 let mut s = vec![];
-                s.push(Span::raw(tl));
+                s.push(Span::styled(border.top_left, border_style));
                 s.push(Span::raw(" "));
 
                 let mut title = Span::from(self.title.as_str());
@@ -125,9 +185,9 @@ impl<'a> Widget for GroupedLines<'a> {
                     .saturating_sub(4)
                     .saturating_sub(self.title.len() as u16))
                 {
-                    s.push(thor.into());
+                    s.push(Span::styled(border.top_horizontal, border_style));
                 }
-                s.push(tr.into());
+                s.push(Span::styled(border.top_right, border_style));
 
                 Line::from(s).render(
                     Rect {
@@ -140,13 +200,13 @@ impl<'a> Widget for GroupedLines<'a> {
                 );
             } else if i.saturating_sub(1) as usize >= self.lines.len() {
                 let mut s = String::new();
-                s.push_str(bl);
+                s.push_str(border.bottom_left);
                 for _ in 0..(area.width.saturating_sub(2)) {
-                    s.push_str(hor);
+                    s.push_str(border.horizontal);
                 }
-                s.push_str(br);
+                s.push_str(border.bottom_right);
 
-                Line::styled(s, fg).render(
+                Line::styled(s, border_style).render(
                     Rect {
                         x: area.x,
                         y,
@@ -158,7 +218,7 @@ impl<'a> Widget for GroupedLines<'a> {
 
                 break;
             } else {
-                Span::styled(ver, fg).render(
+                Span::styled(border.vertical, border_style).render(
                     Rect {
                         x: area.x,
                         y,
@@ -179,7 +239,7 @@ impl<'a> Widget for GroupedLines<'a> {
                     buf,
                 );
 
-                Span::styled(ver, fg).render(
+                Span::styled(border.vertical, border_style).render(
                     Rect {
                         x: area.right().saturating_sub(1),
                         y,
@@ -326,5 +386,65 @@ impl GroupedLinesBuilder {
 
                 Ok(lines)
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::{buffer::Buffer, layout::Rect, style::Color, widgets::Widget};
+
+    use super::{render_border, GroupedLines};
+    use crate::view::theme::{SharedTheme, Theme};
+
+    fn cell_fg(buf: &Buffer, x: u16, y: u16) -> Color {
+        buf[(x, y)].style().fg.unwrap_or(Color::Reset)
+    }
+
+    #[test]
+    fn unfocused_render_border_is_gray() {
+        let area = Rect::new(0, 0, 6, 3);
+        let mut buf = Buffer::empty(area);
+        render_border(false, area, &mut buf);
+        assert_eq!(cell_fg(&buf, 0, 0), Color::Gray);
+        assert_eq!(cell_fg(&buf, 5, 2), Color::Gray);
+    }
+
+    #[test]
+    fn focused_render_border_keeps_default_fg() {
+        let area = Rect::new(0, 0, 6, 3);
+        let mut buf = Buffer::empty(area);
+        render_border(true, area, &mut buf);
+        assert_eq!(cell_fg(&buf, 0, 0), Color::Reset);
+    }
+
+    #[test]
+    fn unfocused_grouped_lines_border_is_gray() {
+        let theme = SharedTheme::new(Theme::default());
+        let widget = GroupedLines::builder(8, &theme)
+            .value("x")
+            .build("T")
+            .unwrap();
+        let area = Rect::new(0, 0, 8, 3);
+        let mut buf = Buffer::empty(area);
+        widget.render(area, &mut buf);
+        assert_eq!(cell_fg(&buf, 0, 0), Color::Gray);
+        assert_eq!(cell_fg(&buf, 0, 1), Color::Gray);
+        assert_eq!(cell_fg(&buf, 0, 2), Color::Gray);
+    }
+
+    #[test]
+    fn focused_grouped_lines_border_keeps_default_fg() {
+        let theme = SharedTheme::new(Theme::default());
+        let widget = GroupedLines::builder(8, &theme)
+            .value("x")
+            .build("T")
+            .unwrap()
+            .focused(true);
+        let area = Rect::new(0, 0, 8, 3);
+        let mut buf = Buffer::empty(area);
+        widget.render(area, &mut buf);
+        assert_eq!(cell_fg(&buf, 0, 0), Color::Reset);
+        assert_eq!(cell_fg(&buf, 0, 1), Color::Reset);
+        assert_eq!(cell_fg(&buf, 0, 2), Color::Reset);
     }
 }
