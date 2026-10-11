@@ -1,41 +1,37 @@
-use std::{
-    cell::Cell,
-    cmp::Ordering,
-    sync::{Arc, RwLock},
-};
+mod detail;
+mod list;
+
+use std::{cell::Cell, sync::Arc};
 
 use chin_tools::AResult;
-use crossterm::event::{KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use detail::{process_action_name, ProcessDetail};
 use flume::Sender;
-
-use once_cell::sync::Lazy;
+use list::{try_change_sort, LineBuilder, ProcessCell};
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style, Stylize},
+    style::Stylize,
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders},
+    widgets::{Block, BorderType, Borders, Clear},
 };
-use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::ResourceEvent,
     component::{
-        overflow_block::OverflowBlock,
         input::Input,
-        ls_kv, render_border, s_label,
+        overflow_block::OverflowBlock,
         stateful_lines::{StatefulColumn, StatefulLinesType},
     },
     resource::SensorRsp,
     sensor::{
         process::{
-            load_process_details, read_process_starttime_ticks, request_sample,
-            send_process_action, LoadAvg, ProcessAction, ProcessItem, ProcessSensor,
-            ProcessSnapshot,
+            read_process_starttime_ticks, request_sample, send_process_action, LoadAvg,
+            ProcessAction, ProcessItem, ProcessSensor, ProcessSnapshot,
         },
-        process_data::Containerization,
-        units::{conver_storage_width4, convert_seconds, convert_speed, convert_storage},
+        units::convert_seconds,
     },
-    tarits::{format_fraction_as_percent, format_percent_number, None2NaN, None2NanString},
+    tarits::{None2NaN, None2NanString},
     utils::{is_alt_char, is_char_and_mod, is_esc},
     view::{theme::SharedTheme, BlockArg, DetailArg, NavigatorEvent},
 };
@@ -44,64 +40,73 @@ use super::{Resource, SensorResultType};
 
 pub const PROCESS_ID: &str = "PROCESS";
 
-static PROCESS_SORT_TYPE: Lazy<RwLock<Option<(ProcessCell, bool)>>> =
-    Lazy::new(|| RwLock::new(None));
-
-#[derive(Debug)]
-struct ProcessDetail {
-    item: ProcessItem,
-    executable: String,
-    workdir: String,
-    environment: Vec<String>,
-    environment_truncated: bool,
+pub(super) fn is_help_key(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('?')
+        && (key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT)
 }
 
-impl ProcessDetail {
-    fn load(item: ProcessItem) -> Self {
-        let details = load_process_details(item.pid);
+pub(super) fn render_keys_popup(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    theme: &SharedTheme,
+    focused: bool,
+    hints: &[(&str, &str)],
+) {
+    if area.width == 0 || area.height == 0 || hints.is_empty() {
+        return;
+    }
+    let key_style = theme.key(focused);
+    let value_style = theme.value(focused);
+    let content_width = hints
+        .iter()
+        .map(|(key, action)| UnicodeWidthStr::width(*key) + UnicodeWidthStr::width(*action) + 4)
+        .max()
+        .unwrap_or(0) as u16;
+    let popup_width = content_width
+        .saturating_add(2)
+        .clamp(24.min(area.width), area.width);
+    let popup_height = (hints.len() as u16).saturating_add(2).min(area.height);
+    let popup = Rect {
+        x: area.x + area.width.saturating_sub(popup_width) / 2,
+        y: area.y + area.height.saturating_sub(popup_height) / 2,
+        width: popup_width,
+        height: popup_height,
+    };
+    if popup.width < 3 || popup.height < 3 {
+        return;
+    }
 
-        Self {
-            item,
-            executable: details.executable,
-            workdir: details.workdir,
-            environment: details.environment,
-            environment_truncated: details.environment_truncated,
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(theme.border(true))
+        .title(" Keys ");
+    let inner = block.inner(popup);
+    frame.render_widget(Clear, popup);
+    frame.render_widget(block, popup);
+
+    let key_column = hints
+        .iter()
+        .map(|(key, _)| UnicodeWidthStr::width(*key))
+        .max()
+        .unwrap_or(0);
+    for (offset, (key, action)) in hints.iter().enumerate() {
+        if offset >= inner.height as usize {
+            break;
         }
-    }
-}
-
-fn process_action_name(action: ProcessAction) -> &'static str {
-    match action {
-        ProcessAction::TERM => "SIGTERM",
-        ProcessAction::INT => "SIGINT",
-        ProcessAction::HUP => "SIGHUP",
-        ProcessAction::STOP => "SIGSTOP",
-        ProcessAction::KILL => "SIGKILL",
-        ProcessAction::CONT => "SIGCONT",
-    }
-}
-
-fn containerization_name(value: Containerization) -> &'static str {
-    match value {
-        Containerization::None => "None",
-        Containerization::Flatpak => "Flatpak",
-        Containerization::Snap => "Snap",
-    }
-}
-
-fn get_process_sort() -> Option<(ProcessCell, bool)> {
-    *PROCESS_SORT_TYPE.read().unwrap()
-}
-
-fn try_change_sort(c: ProcessCell) {
-    let sort = get_process_sort();
-
-    if let Ok(mut write) = PROCESS_SORT_TYPE.write() {
-        if let Some((cell, desc)) = sort {
-            write.replace((c, if cell == c { !desc } else { true }));
-        } else {
-            write.replace((c, true));
-        }
+        let pad = " ".repeat(key_column.saturating_sub(UnicodeWidthStr::width(*key)));
+        frame.render_widget(
+            Line::from(vec![
+                Span::styled(format!("{key}{pad}"), key_style),
+                Span::styled(format!("  {action}"), value_style),
+            ]),
+            Rect {
+                x: inner.x,
+                y: inner.y.saturating_add(offset as u16),
+                width: inner.width,
+                height: 1,
+            },
+        );
     }
 }
 
@@ -129,6 +134,8 @@ pub struct ResProcess {
     detail_scroll: usize,
     pending_signal: Option<ProcessAction>,
     detail_status: Option<String>,
+    detail_keys_hint: bool,
+    list_keys_hint: bool,
 }
 
 #[derive(Debug)]
@@ -138,7 +145,6 @@ pub enum ProcessRsp {
     LoadAvg(LoadAvg),
     Uptime(u64),
 }
-
 impl ResProcess {
     pub fn spawn(theme: SharedTheme, result_tx: &Sender<ResourceEvent>) -> AResult<Self> {
         let result_tx = result_tx.clone();
@@ -162,40 +168,12 @@ impl ResProcess {
             detail_scroll: 0,
             pending_signal: None,
             detail_status: None,
+            detail_keys_hint: false,
+            list_keys_hint: false,
         })
     }
 
     /// Derive the one list used by both the sidebar count and the process
-    /// page from the latest sensor-owned snapshot.
-    fn rebuild_visible_data(&mut self) {
-        let Some(sampled_data) = self.sampled_data.as_ref() else {
-            self.data = None;
-            self.view_state.mark_dirty();
-            return;
-        };
-
-        let filter = self.filter.as_ref().map(Input::get_input);
-        let sort = get_process_sort();
-        if filter.as_deref().is_none_or(str::is_empty) && sort.is_none() {
-            self.data = Some(sampled_data.clone());
-            self.view_state.mark_dirty();
-            return;
-        }
-
-        let mut visible = sampled_data.as_ref().clone();
-        if let Some(filter) = filter {
-            if !filter.is_empty() {
-                visible.retain(|item| item.commandline.contains(&filter));
-            }
-        }
-        if let Some((cell, desc)) = sort {
-            visible.sort_unstable_by(|first, second| cell.cmp(first, second, desc));
-        }
-
-        self.data = Some(Arc::new(visible));
-        self.view_state.mark_dirty();
-    }
-
     fn update_processes(&mut self, process_data: Arc<Vec<ProcessItem>>) {
         let selected_index = self
             .process_list_focused()
@@ -278,6 +256,7 @@ impl ResProcess {
         self.detail = None;
         self.set_process_focus(ProcessPanelFocus::List);
         self.reset_detail_view();
+        self.detail_keys_hint = false;
     }
 
     fn rebind_detail_to(&mut self, item: Option<ProcessItem>) {
@@ -400,236 +379,6 @@ impl ResProcess {
             ),
         });
     }
-
-    fn rebuild_detail_lines(&mut self, width: u16) {
-        if self.detail_line_width == width && !self.detail_lines.is_empty() {
-            return;
-        }
-        let Some(detail) = self.detail.as_ref() else {
-            return;
-        };
-        let key_style = self.theme.key(true);
-        let value_style = self.theme.value(true);
-        let mut lines = vec![Line::raw(
-            "↑/↓ scroll/select · r refresh · t/i/h/k/s/c signal · ← focus list/close · → focus detail",
-        )];
-        let mut push_kv = |key: &str, value: String| {
-            lines.extend(ls_kv(Some(key), &value, width, key_style, value_style));
-        };
-
-        push_kv("PID", detail.item.pid.to_string());
-        push_kv("User", detail.item.user.clone());
-        push_kv("Name", detail.item.display_name.clone());
-        push_kv("Command", detail.item.commandline.clone());
-        push_kv("Executable", detail.executable.clone());
-        push_kv("Workdir", detail.workdir.clone());
-        push_kv(
-            "Container",
-            containerization_name(detail.item.containerization).to_owned(),
-        );
-        push_kv(
-            "Cgroup",
-            detail
-                .item
-                .cgroup
-                .clone()
-                .unwrap_or_else(|| "N/A".to_owned()),
-        );
-        push_kv(
-            "Memory",
-            convert_storage(detail.item.memory_usage as f64, false),
-        );
-        push_kv(
-            "CPU",
-            format_fraction_as_percent(detail.item.cpu_time_ratio as f64),
-        );
-        push_kv("User CPU", format!("{:.2} s", detail.item.user_cpu_time));
-        push_kv(
-            "System CPU",
-            format!("{:.2} s", detail.item.system_cpu_time),
-        );
-        push_kv(
-            "Started",
-            format!("boot + {}", convert_seconds(detail.item.starttime as u64)),
-        );
-        push_kv(
-            "Read",
-            detail
-                .item
-                .read_speed
-                .map(|value| convert_speed(value, false))
-                .unwrap_or_else(|| "N/A".to_owned()),
-        );
-        push_kv(
-            "Read Total",
-            detail
-                .item
-                .read_total
-                .map(|value| convert_storage(value as f64, false))
-                .unwrap_or_else(|| "N/A".to_owned()),
-        );
-        push_kv(
-            "Write",
-            detail
-                .item
-                .write_speed
-                .map(|value| convert_speed(value, false))
-                .unwrap_or_else(|| "N/A".to_owned()),
-        );
-        push_kv(
-            "Write Total",
-            detail
-                .item
-                .write_total
-                .map(|value| convert_storage(value as f64, false))
-                .unwrap_or_else(|| "N/A".to_owned()),
-        );
-        push_kv("Process GPU", "N/A (collection disabled)".to_owned());
-
-        lines.push(Line::raw(""));
-        lines.push(Line::styled(
-            format!(
-                "Environment ({}{})",
-                detail.environment.len(),
-                if detail.environment_truncated {
-                    ", truncated"
-                } else {
-                    ""
-                }
-            ),
-            key_style,
-        ));
-        for entry in &detail.environment {
-            lines.extend(ls_kv(None, entry, width, key_style, value_style));
-        }
-
-        self.detail_lines = lines;
-        self.detail_line_width = width;
-    }
-
-    fn render_detail_drawer(&mut self, frame: &mut ratatui::Frame, rect: Rect, focused: bool) {
-        if rect.width == 0 || rect.height == 0 {
-            return;
-        }
-        let title = self
-            .detail
-            .as_ref()
-            .map(|detail| format!("Process {}", detail.item.pid))
-            .unwrap_or_else(|| "Process".to_owned());
-        let border_type = if focused {
-            BorderType::Double
-        } else {
-            BorderType::Plain
-        };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type)
-            .border_style(self.theme.border(focused))
-            .title(title);
-        let inner = block.inner(rect);
-        frame.render_widget(block, rect);
-        if inner.width == 0 || inner.height == 0 {
-            return;
-        }
-
-        self.rebuild_detail_lines(inner.width);
-        let status_height = u16::from(self.detail_status.is_some());
-        let content_height = inner.height.saturating_sub(status_height);
-        let max_scroll = self
-            .detail_lines
-            .len()
-            .saturating_sub(content_height as usize);
-        self.detail_scroll = self.detail_scroll.min(max_scroll);
-        for (offset, line) in self
-            .detail_lines
-            .iter()
-            .skip(self.detail_scroll)
-            .take(content_height as usize)
-            .enumerate()
-        {
-            frame.render_widget(
-                line,
-                Rect {
-                    x: inner.x,
-                    y: inner.y.saturating_add(offset as u16),
-                    width: inner.width,
-                    height: 1,
-                },
-            );
-        }
-        if let Some(status) = self.detail_status.as_ref() {
-            frame.render_widget(
-                Line::styled(status.as_str(), Style::new().fg(Color::Black)),
-                Rect {
-                    x: inner.x,
-                    y: inner.bottom().saturating_sub(1),
-                    width: inner.width,
-                    height: 1,
-                },
-            );
-        }
-    }
-
-    pub(crate) fn render_process_list(&mut self, frame: &mut ratatui::Frame, args: &DetailArg) {
-        if args.rect.width == 0 || args.rect.height == 0 {
-            return;
-        }
-
-        let inner = Rect {
-            x: args.rect.x.saturating_add(1),
-            y: args.rect.y.saturating_add(1),
-            width: args.rect.width.saturating_sub(2),
-            height: args.rect.height.saturating_sub(2),
-        };
-
-        if let Some(filter) = self.filter.as_mut() {
-            let rect = Rect {
-                y: inner.y,
-                height: 1,
-                ..inner
-            };
-            filter.draw(frame, &rect);
-        }
-
-        let content_rect = if self.filter.is_some() {
-            Rect {
-                y: inner.y.saturating_add(1),
-                height: inner.height.saturating_sub(1),
-                ..inner
-            }
-        } else {
-            inner
-        };
-
-        if content_rect.width > 0 && content_rect.height > 0 {
-            let list_args = DetailArg {
-                rect: content_rect,
-                ..args.clone()
-            };
-            match self._build_page(&list_args) {
-                Ok(_) => {}
-                Err(err) => {
-                    log::error!("unable to render_page: {}", err);
-                    return;
-                }
-            }
-
-            let lines = self.cached_page_state();
-            if let StatefulLinesType::Lines(lines) = lines {
-                lines.render(frame, content_rect);
-            }
-        }
-
-        render_border(
-            args.active && self.process_list_focused(),
-            args.rect,
-            frame.buffer_mut(),
-        );
-    }
-
-    pub(crate) fn render_process_detail(&mut self, frame: &mut ratatui::Frame, args: &DetailArg) {
-        self.render_detail_drawer(frame, args.rect, self.process_detail_focused());
-    }
 }
 
 impl Resource for ResProcess {
@@ -720,6 +469,20 @@ impl Resource for ResProcess {
     fn handle_navi_event(&mut self, event: &NavigatorEvent) -> bool {
         match event {
             NavigatorEvent::KeyEvent(ke) => {
+                if self.detail.is_some() && self.detail_keys_hint {
+                    if is_help_key(ke) || is_esc(ke) {
+                        self.detail_keys_hint = false;
+                    }
+                    return true;
+                }
+
+                if self.list_keys_hint {
+                    if is_help_key(ke) || is_esc(ke) {
+                        self.list_keys_hint = false;
+                    }
+                    return true;
+                }
+
                 if self.process_list_focused() {
                     if let Some(input) = self.filter.as_mut() {
                         let handled = input.handle_event(ke);
@@ -742,9 +505,19 @@ impl Resource for ResProcess {
                         self.rebuild_visible_data();
                         return true;
                     }
+
+                    if is_help_key(ke) {
+                        self.list_keys_hint = true;
+                        return true;
+                    }
                 }
 
                 if self.detail.is_some() {
+                    if self.process_detail_focused() && is_help_key(ke) {
+                        self.detail_keys_hint = true;
+                        return true;
+                    }
+
                     if self.pending_signal.is_some() {
                         match ke.code {
                             KeyCode::Char('y') => self.confirm_signal(),
@@ -861,7 +634,7 @@ mod tests {
         view::{theme::Theme, DetailArg, NavigatorEvent},
     };
 
-    use super::{LineBuilder, ProcessPanelFocus, ProcessRsp, ResProcess};
+    use super::{list::LineBuilder, ProcessPanelFocus, ProcessRsp, ResProcess};
 
     fn process_item(pid: i32) -> ProcessItem {
         ProcessItem {
@@ -906,6 +679,8 @@ mod tests {
             detail_scroll: 0,
             pending_signal: None,
             detail_status: None,
+            detail_keys_hint: false,
+            list_keys_hint: false,
         };
         process.view_state.update_view_height(20);
         process.view_state.mark_dirty();
@@ -1040,6 +815,64 @@ mod tests {
         assert!(title_row.contains("Process 7"), "{title_row:?}");
     }
 
+    fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
+        let area = terminal.backend().buffer().area;
+        let mut text = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                text.push_str(terminal.backend().buffer()[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        text
+    }
+
+    #[test]
+    fn process_detail_shows_keys_only_after_question_mark() {
+        let mut process = process_with_items(vec![process_item(7)]);
+        process.set_detail(process_item(7));
+        process.set_process_focus(ProcessPanelFocus::Detail);
+
+        let draw = |process: &mut ResProcess| {
+            let mut terminal = Terminal::new(TestBackend::new(60, 30)).unwrap();
+            terminal
+                .draw(|frame| {
+                    process.render_process_detail(
+                        frame,
+                        &DetailArg {
+                            rect: Rect::new(0, 0, 60, 30),
+                            active: true,
+                        },
+                    );
+                })
+                .unwrap();
+            buffer_text(&terminal)
+        };
+
+        let hidden = draw(&mut process);
+        assert!(!hidden.contains("Keys"), "{hidden}");
+        assert!(!hidden.contains("refresh"), "{hidden}");
+
+        assert!(process.handle_navi_event(&key(KeyCode::Char('?'))));
+        let shown = draw(&mut process);
+        assert!(shown.contains("Keys"), "{shown}");
+        assert!(shown.contains("refresh"), "{shown}");
+        assert!(shown.contains("SIGTERM"), "{shown}");
+        let keys_row = shown.lines().position(|line| line.contains("Keys"));
+        let refresh_row = shown.lines().position(|line| line.contains("refresh"));
+        assert!(keys_row.is_some_and(|row| row > 0), "{shown}");
+        assert!(
+            refresh_row.is_some_and(|row| row + 1 < shown.lines().count()),
+            "{shown}"
+        );
+
+        assert!(process.handle_navi_event(&key(KeyCode::Esc)));
+        assert!(process.detail.is_some());
+        let hidden_again = draw(&mut process);
+        assert!(!hidden_again.contains("Keys"), "{hidden_again}");
+        assert!(!hidden_again.contains("refresh"), "{hidden_again}");
+    }
+
     #[test]
     fn one_snapshot_updates_sidebar_and_process_list_data() {
         let mut process = process_with_items(vec![]);
@@ -1084,208 +917,70 @@ mod tests {
         assert_eq!(process.data.as_ref().unwrap()[0].pid, 2);
         assert_eq!(process.sampled_data.as_ref().unwrap().len(), 2);
     }
-}
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[allow(dead_code)]
-#[allow(clippy::upper_case_acronyms)]
-enum ProcessCell {
-    PID,
-    PRG,
-    USER,
-    CMD,
-    MEM,
-    CPU,
-    READ,
-    WRITE,
-    TIME,
-}
+    #[test]
+    fn process_list_shows_keys_only_after_question_mark() {
+        let mut process = process_with_items(vec![process_item(1), process_item(2)]);
 
-impl ProcessCell {
-    fn width(&self) -> u16 {
-        match self {
-            ProcessCell::PID => 9,
-            ProcessCell::PRG => 11,
-            ProcessCell::USER => 6,
-            ProcessCell::CMD => 200,
-            ProcessCell::MEM => 7,
-            ProcessCell::CPU => 6,
-            ProcessCell::READ => 7,
-            ProcessCell::WRITE => 7,
-            ProcessCell::TIME => 20,
-        }
-    }
-
-    fn keep_width<S>(&self, noodle: S) -> String
-    where
-        S: Into<String>,
-    {
-        let total_width = self.width();
-        let content_width = total_width.saturating_sub(2);
-        let mut noodle: String = noodle.into();
-
-        let mut width: usize = 0;
-        let mut size = None;
-
-        for c in noodle.chars() {
-            if let Some(wid) = c.width() {
-                let nw = width.saturating_add(wid);
-                if nw > content_width.into() {
-                    size.replace(width);
-                    break;
-                }
-                width = nw;
-            }
-        }
-
-        if let Some(size) = size {
-            noodle.truncate(size);
-        }
-
-        let padding = total_width.saturating_sub(width as u16);
-        if padding > 0 {
-            for _ in 0..padding {
-                noodle.push(' ');
-            }
-        }
-
-        noodle
-    }
-
-    fn to_value(self, data: &ProcessItem) -> Span<'static> {
-        let s = match self {
-            ProcessCell::PID => self.keep_width(data.pid.to_string().as_str()),
-            ProcessCell::USER => self.keep_width(data.user.as_str()),
-            ProcessCell::CMD => self.keep_width(data.commandline.as_str()),
-            ProcessCell::MEM => {
-                self.keep_width(conver_storage_width4(data.memory_usage as f64).as_str())
-            }
-            ProcessCell::CPU => {
-                self.keep_width(format_percent_number(data.cpu_time_ratio as f64 * 100.).as_str())
-            }
-            ProcessCell::READ => match data.read_speed.as_ref() {
-                Some(o) => self.keep_width(conver_storage_width4(*o).as_str()),
-                None => {
-                    return s_label(
-                        &self.keep_width(conver_storage_width4(0.).as_str()),
-                        Style::new().fg(Color::Black),
-                    )
-                }
-            },
-            ProcessCell::WRITE => match data.write_speed.as_ref() {
-                Some(o) => self.keep_width(conver_storage_width4(*o).as_str()),
-                None => {
-                    return s_label(
-                        &self.keep_width(conver_storage_width4(0.).as_str()),
-                        Style::new().fg(Color::Black),
-                    )
-                }
-            },
-            ProcessCell::TIME => self.keep_width(data.starttime.to_string().as_str()),
-            ProcessCell::PRG => self.keep_width(&data.display_name),
+        let draw = |process: &mut ResProcess| {
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal
+                .draw(|frame| {
+                    process.render_process_list(
+                        frame,
+                        &DetailArg {
+                            rect: Rect::new(0, 0, 80, 24),
+                            active: true,
+                        },
+                    );
+                })
+                .unwrap();
+            buffer_text(&terminal)
         };
 
-        s.into()
+        let hidden = draw(&mut process);
+        assert!(!hidden.contains("Keys"), "{hidden}");
+        assert!(!hidden.contains("sort by PID"), "{hidden}");
+
+        assert!(process.handle_navi_event(&key(KeyCode::Char('?'))));
+        assert!(process.list_keys_hint);
+        assert!(!process.detail_keys_hint);
+        let shown = draw(&mut process);
+        assert!(shown.contains("Keys"), "{shown}");
+        assert!(shown.contains("sort by PID"), "{shown}");
+        assert!(shown.contains("filter"), "{shown}");
+        let keys_row = shown.lines().position(|line| line.contains("Keys"));
+        assert!(keys_row.is_some_and(|row| row > 0), "{shown}");
+
+        assert!(process.handle_navi_event(&key(KeyCode::Esc)));
+        assert!(!process.list_keys_hint);
+        let hidden_again = draw(&mut process);
+        assert!(!hidden_again.contains("sort by PID"), "{hidden_again}");
     }
 
-    fn to_label(self, suffix: char) -> Span<'static> {
-        let mut s = String::new();
-        let label = match self {
-            ProcessCell::PID => "PID",
-            ProcessCell::PRG => "NAME",
-            ProcessCell::USER => "USER",
-            ProcessCell::CMD => "CMD",
-            ProcessCell::MEM => "MEM",
-            ProcessCell::CPU => "CPU",
-            ProcessCell::READ => "READ",
-            ProcessCell::WRITE => "WRIT",
-            ProcessCell::TIME => "TIME",
-        };
-        s.push_str(label);
-        s.push(suffix);
+    #[test]
+    fn question_mark_follows_the_focused_process_pane() {
+        let mut process = process_with_items(vec![process_item(7)]);
+        process.set_detail(process_item(7));
+        process.set_process_focus(ProcessPanelFocus::List);
 
-        s = self.keep_width(s);
-        s.into()
+        assert!(process.handle_navi_event(&key(KeyCode::Char('?'))));
+        assert!(process.list_keys_hint);
+        assert!(!process.detail_keys_hint);
+
+        assert!(process.handle_navi_event(&key(KeyCode::Esc)));
+        process.set_process_focus(ProcessPanelFocus::Detail);
+        assert!(process.handle_navi_event(&key(KeyCode::Char('?'))));
+        assert!(!process.list_keys_hint);
+        assert!(process.detail_keys_hint);
     }
 
-    fn cmp(&self, f: &ProcessItem, b: &ProcessItem, desc: bool) -> Ordering {
-        let r = match self {
-            ProcessCell::PID => f.pid.cmp(&b.pid),
-            ProcessCell::PRG => f.display_name.cmp(&b.display_name),
-            ProcessCell::USER => f.user.cmp(&b.user),
-            ProcessCell::CMD => f.commandline.cmp(&b.commandline),
-            ProcessCell::MEM => f.memory_usage.cmp(&b.memory_usage),
-            ProcessCell::CPU => f.cpu_time_ratio.total_cmp(&b.cpu_time_ratio),
-            ProcessCell::READ => f
-                .read_speed
-                .partial_cmp(&b.read_speed)
-                .unwrap_or(Ordering::Equal),
-            ProcessCell::WRITE => f
-                .write_speed
-                .partial_cmp(&b.write_speed)
-                .unwrap_or(Ordering::Equal),
-            ProcessCell::TIME => Ordering::Equal,
-        };
-
-        if desc {
-            r.reverse()
-        } else {
-            r
-        }
-    }
-}
-
-#[derive(Debug)]
-struct LineBuilder {
-    labels: Vec<ProcessCell>,
-}
-
-impl LineBuilder {
-    pub fn new() -> Self {
-        let header = vec![
-            ProcessCell::PID,
-            ProcessCell::USER,
-            ProcessCell::CPU,
-            ProcessCell::MEM,
-            ProcessCell::READ,
-            ProcessCell::WRITE,
-            ProcessCell::CMD,
-        ];
-
-        Self { labels: header }
-    }
-
-    fn to_line(&self, item: &ProcessItem, active: bool) -> Line<'static> {
-        let spans: Vec<Span<'static>> = self.labels.iter().map(|pc| pc.to_value(item)).collect();
-        let line: Line<'static> = spans.into();
-        if active {
-            line.add_modifier(Modifier::REVERSED)
-        } else {
-            line
-        }
-    }
-
-    fn to_header(&self) -> Line<'static> {
-        let mut spans: Vec<Span<'static>> = vec![];
-        let cmp = { *PROCESS_SORT_TYPE.read().unwrap() };
-
-        for ele in self.labels.iter() {
-            let suffix = if let Some((cell, desc)) = cmp {
-                if cell == *ele {
-                    if desc {
-                        '↓'
-                    } else {
-                        '↑'
-                    }
-                } else {
-                    ' '
-                }
-            } else {
-                ' '
-            };
-
-            spans.push(ele.to_label(suffix))
-        }
-        spans.into()
+    #[test]
+    fn filter_consumes_question_mark() {
+        let mut process = process_with_items(vec![process_item(1)]);
+        assert!(process.handle_navi_event(&key(KeyCode::Char('/'))));
+        assert!(process.handle_navi_event(&key(KeyCode::Char('?'))));
+        assert!(!process.list_keys_hint);
+        assert!(process.filter.as_ref().unwrap().get_input().contains('?'));
     }
 }
