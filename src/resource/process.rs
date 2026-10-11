@@ -20,7 +20,7 @@ use unicode_width::UnicodeWidthChar;
 use crate::{
     app::ResourceEvent,
     component::{
-        grouped_lines::GroupedLines,
+        overflow_block::OverflowBlock,
         input::Input,
         ls_kv, render_border, s_label,
         stateful_lines::{StatefulColumn, StatefulLinesType},
@@ -648,9 +648,9 @@ impl Resource for ResProcess {
 
     fn get_req(&self) -> Self::Req {}
 
-    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
+    fn block(&self, args: &mut BlockArg) -> AResult<OverflowBlock<'static>> {
         let width = args.width;
-        let block = GroupedLines::builder(width, &self.theme)
+        let block = OverflowBlock::builder(width, &self.theme)
             .kv("Uptime", convert_seconds(self.uptime.get()))
             .kv("Load", self.loadavg.or_nan_owned())
             .kv(

@@ -4,9 +4,9 @@ use chin_tools::{AResult, SharedStr};
 
 use crate::{
     component::{
-        grouped_lines::GroupedLines,
+        overflow_block::OverflowBlock,
         ls_history_graph,
-        stateful_lines::{StatefulGroupedLines, StatefulLinesType},
+        stateful_lines::{StatefulOverflowBlock, StatefulLinesType},
     },
     ring::{Ring, DEFAULT_HISTORY_LEN},
     sensor::{
@@ -39,7 +39,7 @@ pub struct ResGPU {
     pci_express_speed: SharedStr,
     max_pci_express_speed: SharedStr,
 
-    viewer_state: StatefulGroupedLines<'static>,
+    viewer_state: StatefulOverflowBlock<'static>,
 }
 
 impl ResGPU {
@@ -61,7 +61,7 @@ impl ResGPU {
                     info: Arc::new(e),
                     total_usage_history: Ring::new(DEFAULT_HISTORY_LEN),
                     gpu_data: None,
-                    viewer_state: StatefulGroupedLines::default(),
+                    viewer_state: StatefulOverflowBlock::default(),
                     pci_express_speed: pci_express_speed.into(),
                     max_pci_express_speed: max_pci_express_speed.into(),
                     vcn_usage_history: Ring::new(DEFAULT_HISTORY_LEN),
@@ -100,7 +100,7 @@ impl Resource for ResGPU {
         self.gpu_data.replace(data.clone());
     }
 
-    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
+    fn block(&self, args: &mut BlockArg) -> AResult<OverflowBlock<'static>> {
         let width = args.width;
         let title = format!(
             "GPU({})",
@@ -111,7 +111,7 @@ impl Resource for ResGPU {
                 .or_unk_def()
         );
         let block = if let Some(gpu_data) = self.gpu_data.as_ref() {
-            GroupedLines::builder(width, &self.theme)
+            OverflowBlock::builder(width, &self.theme)
                 .kv(
                     "UR",
                     format!(
@@ -135,7 +135,7 @@ impl Resource for ResGPU {
                 .active(args.focused)
                 .build(title)?
         } else {
-            GroupedLines::builder(width, &self.theme).build(title)?
+            OverflowBlock::builder(width, &self.theme).build(title)?
         };
 
         Ok(block)
@@ -158,7 +158,7 @@ impl Resource for ResGPU {
         let mut blocks = vec![];
 
         if let Some(gpu_data) = self.gpu_data.as_ref() {
-            let usage = GroupedLines::builder(width, &self.theme)
+            let usage = OverflowBlock::builder(width, &self.theme)
                 .kv(
                     "Utilization",
                     gpu_data
@@ -217,7 +217,7 @@ impl Resource for ResGPU {
             blocks.push(usage);
         }
 
-        let props = GroupedLines::builder(width, &self.theme)
+        let props = OverflowBlock::builder(width, &self.theme)
             .kv_sep("Name", self.info.name().ok().or_unk_def())
             .kv_sep(
                 "Manufacturer",

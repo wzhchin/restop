@@ -5,9 +5,9 @@ use ratatui::layout::Rect;
 
 use crate::{
     component::{
-        grouped_lines::GroupedLines,
+        overflow_block::OverflowBlock,
         s_percent_graph,
-        stateful_lines::{StatefulGroupedLines, StatefulLinesType},
+        stateful_lines::{StatefulOverflowBlock, StatefulLinesType},
     },
     sensor::{
         battery::{Battery, BatteryData},
@@ -27,7 +27,7 @@ pub struct ResBattery {
     path: Arc<PathBuf>,
     data: Option<Arc<BatteryData>>,
     theme: SharedTheme,
-    viewer_state: StatefulGroupedLines<'static>,
+    viewer_state: StatefulOverflowBlock<'static>,
 }
 
 impl ResBattery {
@@ -72,9 +72,9 @@ impl Resource for ResBattery {
         self.path.clone()
     }
 
-    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
+    fn block(&self, args: &mut BlockArg) -> AResult<OverflowBlock<'static>> {
         let width = args.width;
-        let block = GroupedLines::builder(width, &self.theme)
+        let block = OverflowBlock::builder(width, &self.theme)
             .line(
                 s_percent_graph(
                     self.data
@@ -101,7 +101,7 @@ impl Resource for ResBattery {
         } = args.rect;
         let info = &self.info;
         let mut blocks = vec![];
-        let usage = GroupedLines::builder(width, &self.theme)
+        let usage = OverflowBlock::builder(width, &self.theme)
             .line(
                 s_percent_graph(
                     self.data
@@ -118,7 +118,7 @@ impl Resource for ResBattery {
 
         blocks.push(usage);
 
-        let properties = GroupedLines::builder(width, &self.theme)
+        let properties = OverflowBlock::builder(width, &self.theme)
             .kv_sep("Sys Path", info.sysfs_path.to_str().or_nan_def())
             .kv_sep(
                 "State",

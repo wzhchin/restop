@@ -5,9 +5,9 @@ use ratatui::layout::Rect;
 
 use crate::{
     component::{
-        grouped_lines::GroupedLines,
+        overflow_block::OverflowBlock,
         ls_history_graph,
-        stateful_lines::{StatefulGroupedLines, StatefulLinesType},
+        stateful_lines::{StatefulOverflowBlock, StatefulLinesType},
     },
     ring::{Ring, DEFAULT_HISTORY_LEN},
     sensor::{
@@ -42,7 +42,7 @@ pub struct ResNetwork {
     sendhistory: Ring<f64>,
     receive_history: Ring<f64>,
 
-    viewer_state: StatefulGroupedLines<'static>,
+    viewer_state: StatefulOverflowBlock<'static>,
 }
 
 impl ResNetwork {
@@ -161,9 +161,9 @@ impl Resource for ResNetwork {
         self.old_sent_bytes = sent_bytes.as_ref().map(|e| *e).ok();
     }
 
-    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
+    fn block(&self, args: &mut BlockArg) -> AResult<OverflowBlock<'static>> {
         let width = args.width;
-        let block = GroupedLines::builder(width, &self.theme)
+        let block = OverflowBlock::builder(width, &self.theme)
             .multi_kv_single_line(vec![
                 (
                     "R",
@@ -223,7 +223,7 @@ impl Resource for ResNetwork {
             )
         }
 
-        let usage = GroupedLines::builder(width, &self.theme)
+        let usage = OverflowBlock::builder(width, &self.theme)
             .kv_sep(
                 "Receiving",
                 label(&self.receive_history, &self.highest_received_speed.get()),
@@ -264,7 +264,7 @@ impl Resource for ResNetwork {
             .build("Usage")?;
         blocks.push(usage);
 
-        let props = GroupedLines::builder(width, &self.theme)
+        let props = OverflowBlock::builder(width, &self.theme)
             .kv_sep("Sys Path", self.info.sysfs_path.to_str().or_nan_def())
             .kv_sep("Connection Type", self.info.interface_type.to_string())
             .kv_sep(

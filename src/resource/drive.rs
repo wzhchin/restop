@@ -11,9 +11,9 @@ use ratatui::text::{Line, Span};
 
 use crate::{
     component::{
-        grouped_lines::GroupedLines,
+        overflow_block::OverflowBlock,
         ls_history_graph, s_percent_graph,
-        stateful_lines::{StatefulGroupedLines, StatefulLinesType},
+        stateful_lines::{StatefulOverflowBlock, StatefulLinesType},
     },
     ring::{Ring, DEFAULT_HISTORY_LEN, SHORT_HISTORY_LEN},
     sensor::{
@@ -102,7 +102,7 @@ pub struct ResDrive {
 
     partitions: Vec<Partition>,
 
-    viewer_state: StatefulGroupedLines<'static>,
+    viewer_state: StatefulOverflowBlock<'static>,
 }
 
 impl ResDrive {
@@ -256,9 +256,9 @@ impl Resource for ResDrive {
         }
     }
 
-    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
+    fn block(&self, args: &mut BlockArg) -> AResult<OverflowBlock<'static>> {
         let width = args.width;
-        let block = GroupedLines::builder(width, &self.theme)
+        let block = OverflowBlock::builder(width, &self.theme)
             .kv("Size", self.info.display_name())
             .kv(
                 "UR",
@@ -287,7 +287,7 @@ impl Resource for ResDrive {
             )
         }
 
-        let usage = GroupedLines::builder(width, &self.theme)
+        let usage = OverflowBlock::builder(width, &self.theme)
             .kv(
                 "Drive Activity",
                 self.activity_history
@@ -347,7 +347,7 @@ impl Resource for ResDrive {
 
         blocks.push(usage);
 
-        let mut partitions = GroupedLines::builder(width, &self.theme);
+        let mut partitions = OverflowBlock::builder(width, &self.theme);
         for part in &self.partitions {
             partitions = partitions
                 .line(
@@ -386,7 +386,7 @@ impl Resource for ResDrive {
 
         blocks.push(partitions.active(args.active).build("Partitions")?);
 
-        let props = GroupedLines::builder(width, &self.theme)
+        let props = OverflowBlock::builder(width, &self.theme)
             .kv_sep("Sys Path", self.info.sysfs_path.to_str().or_nan_def())
             .kv_sep("Model", self.info.model.or_unk_def())
             .kv_sep("Type", self.info.drive_type.to_string())

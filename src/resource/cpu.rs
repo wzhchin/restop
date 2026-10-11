@@ -6,9 +6,9 @@ use ratatui::text::{Line, Span};
 
 use crate::{
     component::{
-        grouped_lines::GroupedLines,
+        overflow_block::OverflowBlock,
         ls_history_graph, s_history_graph,
-        stateful_lines::{StatefulGroupedLines, StatefulLinesType},
+        stateful_lines::{StatefulOverflowBlock, StatefulLinesType},
         PaddingH,
     },
     ring::{Ring, DEFAULT_HISTORY_LEN, SHORT_HISTORY_LEN},
@@ -59,7 +59,7 @@ pub struct ResCPU {
 
     frequency: Option<u64>,
     tempurature: Option<f32>,
-    viewer_state: StatefulGroupedLines<'static>,
+    viewer_state: StatefulOverflowBlock<'static>,
 }
 
 impl ResCPU {
@@ -138,9 +138,9 @@ impl Resource for ResCPU {
         self.frequency = *frequency;
     }
 
-    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
+    fn block(&self, args: &mut BlockArg) -> AResult<OverflowBlock<'static>> {
         let width = args.width;
-        let block = GroupedLines::builder(width, &self.theme)
+        let block = OverflowBlock::builder(width, &self.theme)
             .kv(
                 "UR",
                 format!(
@@ -209,13 +209,13 @@ impl Resource for ResCPU {
             })
             .collect();
 
-        let graphs = GroupedLines::builder(width, &self.theme)
+        let graphs = OverflowBlock::builder(width, &self.theme)
             .lines(graphs)
             .active(args.active)
             .build("Usage")?;
         result.push(graphs);
 
-        let sensors = GroupedLines::builder(width, &self.theme)
+        let sensors = OverflowBlock::builder(width, &self.theme)
             .kv_sep(
                 "Temperature",
                 self.tempurature.or_nan(|e| convert_temperature(*e as f64)),
@@ -229,7 +229,7 @@ impl Resource for ResCPU {
 
         result.push(sensors.build("Sensors")?);
 
-        let properties = GroupedLines::builder(width, &self.theme)
+        let properties = OverflowBlock::builder(width, &self.theme)
             .kv_sep("Model", info.model_name.or_unk_def())
             .kv_sep(
                 "Max Frequency",

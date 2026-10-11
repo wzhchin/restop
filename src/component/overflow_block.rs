@@ -63,7 +63,7 @@ pub fn render_border(focused: bool, area: Rect, buf: &mut Buffer) {
 }
 
 #[derive(Clone, Debug)]
-pub struct GroupedLines<'a> {
+pub struct OverflowBlock<'a> {
     width: u16,
     start: Option<u16>,
     end: Option<u16>,
@@ -74,7 +74,7 @@ pub struct GroupedLines<'a> {
     active: bool,
 }
 
-impl<'a> GroupedLines<'a> {
+impl<'a> OverflowBlock<'a> {
     pub fn new<T>(title: T, width: u16, theme: &SharedTheme) -> Self
     where
         T: Into<String>,
@@ -122,12 +122,12 @@ impl<'a> GroupedLines<'a> {
         self.lines.len() + 2
     }
 
-    pub fn builder(width: u16, theme: &SharedTheme) -> GroupedLinesBuilder {
-        GroupedLinesBuilder::new(width, theme)
+    pub fn builder(width: u16, theme: &SharedTheme) -> OverflowBlockBuilder {
+        OverflowBlockBuilder::new(width, theme)
     }
 }
 
-impl<'a> Widget for GroupedLines<'a> {
+impl<'a> Widget for OverflowBlock<'a> {
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized,
@@ -232,7 +232,7 @@ impl<'a> Widget for GroupedLines<'a> {
     }
 }
 
-enum GroupedLinesBuilderType {
+enum OverflowBlockBuilderType {
     KV(String, String),
     Value(String),
     EmptySep,
@@ -241,16 +241,16 @@ enum GroupedLinesBuilderType {
     MultiKVSingleLine(Vec<(String, String)>),
 }
 
-pub struct GroupedLinesBuilder {
+pub struct OverflowBlockBuilder {
     width: u16,
-    pairs: Vec<GroupedLinesBuilderType>,
+    pairs: Vec<OverflowBlockBuilderType>,
     theme: SharedTheme,
     sep: bool,
     focused: bool,
     active: bool,
 }
 
-impl GroupedLinesBuilder {
+impl OverflowBlockBuilder {
     fn new(width: u16, theme: &SharedTheme) -> Self {
         Self {
             width,
@@ -272,7 +272,7 @@ impl GroupedLinesBuilder {
             .map(|(k, v)| (k.to_string(), v.into()))
             .collect();
         s.pairs
-            .push(GroupedLinesBuilderType::MultiKVSingleLine(kvs));
+            .push(OverflowBlockBuilderType::MultiKVSingleLine(kvs));
         s
     }
 
@@ -295,7 +295,7 @@ impl GroupedLinesBuilder {
     {
         let mut s = if self.sep { self.empty_sep() } else { self };
         s.pairs
-            .push(GroupedLinesBuilderType::KV(key.to_string(), value.into()));
+            .push(OverflowBlockBuilderType::KV(key.to_string(), value.into()));
         s
     }
 
@@ -304,30 +304,30 @@ impl GroupedLinesBuilder {
         T: Into<String>,
     {
         let mut s = if self.sep { self.empty_sep() } else { self };
-        s.pairs.push(GroupedLinesBuilderType::Value(value.into()));
+        s.pairs.push(OverflowBlockBuilderType::Value(value.into()));
         s
     }
 
     pub fn line(mut self, line: Line<'static>) -> Self {
-        self.pairs.push(GroupedLinesBuilderType::Line(line));
+        self.pairs.push(OverflowBlockBuilderType::Line(line));
         self
     }
 
     pub fn lines(mut self, lines: Vec<Line<'static>>) -> Self {
-        self.pairs.push(GroupedLinesBuilderType::Lines(lines));
+        self.pairs.push(OverflowBlockBuilderType::Lines(lines));
         self
     }
 
     pub fn empty_sep(mut self) -> Self {
-        self.pairs.push(GroupedLinesBuilderType::EmptySep);
+        self.pairs.push(OverflowBlockBuilderType::EmptySep);
         self
     }
 
-    pub fn build<T>(self, title: T) -> AResult<GroupedLines<'static>>
+    pub fn build<T>(self, title: T) -> AResult<OverflowBlock<'static>>
     where
         T: Into<String>,
     {
-        GroupedLines::new(title.into(), self.width, &self.theme)
+        OverflowBlock::new(title.into(), self.width, &self.theme)
             .focused(self.focused)
             .active(self.active)
             .lines(|width| {
@@ -337,14 +337,14 @@ impl GroupedLinesBuilder {
 
                 for p in self.pairs {
                     match p {
-                        GroupedLinesBuilderType::KV(k, v) => {
+                        OverflowBlockBuilderType::KV(k, v) => {
                             lines.extend(ls_kv(Some(&k), &v, width, key_style, value_style));
                         }
-                        GroupedLinesBuilderType::Line(line) => lines.push(line),
-                        GroupedLinesBuilderType::Lines(ls) => lines.extend(ls),
-                        GroupedLinesBuilderType::EmptySep => lines.push(Line::raw("")),
-                        GroupedLinesBuilderType::Value(v) => lines.extend(ls_common(&v, width)),
-                        GroupedLinesBuilderType::MultiKVSingleLine(kvs) => {
+                        OverflowBlockBuilderType::Line(line) => lines.push(line),
+                        OverflowBlockBuilderType::Lines(ls) => lines.extend(ls),
+                        OverflowBlockBuilderType::EmptySep => lines.push(Line::raw("")),
+                        OverflowBlockBuilderType::Value(v) => lines.extend(ls_common(&v, width)),
+                        OverflowBlockBuilderType::MultiKVSingleLine(kvs) => {
                             let mut spans = vec![];
                             let mut visit = false;
                             for (k, v) in kvs {
@@ -372,7 +372,7 @@ impl GroupedLinesBuilder {
 mod tests {
     use ratatui::{buffer::Buffer, layout::Rect, style::Color, widgets::Widget};
 
-    use super::{render_border, GroupedLines};
+    use super::{render_border, OverflowBlock};
     use crate::view::theme::{SharedTheme, Theme};
 
     fn cell_fg(buf: &Buffer, x: u16, y: u16) -> Color {
@@ -397,9 +397,9 @@ mod tests {
     }
 
     #[test]
-    fn unfocused_grouped_lines_border_is_gray() {
+    fn unfocused_overflow_block_border_is_gray() {
         let theme = SharedTheme::new(Theme::default());
-        let widget = GroupedLines::builder(8, &theme)
+        let widget = OverflowBlock::builder(8, &theme)
             .value("x")
             .build("T")
             .unwrap();
@@ -412,9 +412,9 @@ mod tests {
     }
 
     #[test]
-    fn focused_grouped_lines_border_keeps_default_fg() {
+    fn focused_overflow_block_border_keeps_default_fg() {
         let theme = SharedTheme::new(Theme::default());
-        let widget = GroupedLines::builder(8, &theme)
+        let widget = OverflowBlock::builder(8, &theme)
             .value("x")
             .build("T")
             .unwrap()

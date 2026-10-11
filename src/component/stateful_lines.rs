@@ -5,7 +5,7 @@ use std::{
 
 use ratatui::{layout::Rect, text::Line, Frame};
 
-use super::grouped_lines::GroupedLines;
+use super::overflow_block::OverflowBlock;
 
 #[derive(Default, Clone, Debug)]
 pub struct LinesVerticalState {
@@ -164,11 +164,11 @@ impl<'a> StatefulColumn<'a> {
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct StatefulGroupedLines<'a> {
+pub struct StatefulOverflowBlock<'a> {
     pub show_start: usize,
     view_height: u16,
     cur_line: usize,
-    blocks: Vec<(IndexedRange, GroupedLines<'a>)>,
+    blocks: Vec<(IndexedRange, OverflowBlock<'a>)>,
 }
 
 #[derive(Clone, Debug, Copy)]
@@ -178,7 +178,7 @@ pub struct IndexedRange {
     pub end: usize,
 }
 
-impl<'a> StatefulGroupedLines<'a> {
+impl<'a> StatefulOverflowBlock<'a> {
     pub fn show_end(&self) -> usize {
         self.show_start.saturating_add(self.view_height.into())
     }
@@ -245,7 +245,7 @@ impl<'a> StatefulGroupedLines<'a> {
         }
     }
 
-    pub fn update_blocks(&mut self, blocks: Vec<GroupedLines<'a>>) {
+    pub fn update_blocks(&mut self, blocks: Vec<OverflowBlock<'a>>) {
         let mut visited: usize = 0;
         let mut new_blocks = vec![];
         for (index, block) in blocks.into_iter().enumerate() {
@@ -318,7 +318,7 @@ impl<'a> StatefulGroupedLines<'a> {
 }
 
 pub enum StatefulLinesType<'a, 'b> {
-    Groups(&'b mut StatefulGroupedLines<'a>),
+    Groups(&'b mut StatefulOverflowBlock<'a>),
     Lines(&'b mut StatefulColumn<'a>),
 }
 

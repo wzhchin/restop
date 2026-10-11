@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::{component::stateful_lines::StatefulGroupedLines, resource::ResourceType};
+use crate::{component::stateful_lines::StatefulOverflowBlock, resource::ResourceType};
 
 use super::{BlockArg, DetailArg, Navigator, NavigatorArgs};
 
@@ -19,7 +19,7 @@ const PROCESS_PANE_GAP: u16 = 1;
 #[derive(Debug, Default)]
 pub struct SidebarAndPage {
     pub sidebar: Rect,
-    pub sidebar_state: StatefulGroupedLines<'static>,
+    pub sidebar_state: StatefulOverflowBlock<'static>,
     pub page: Rect,
     process_list: Rect,
     process_detail: Option<Rect>,

@@ -3,9 +3,9 @@ use itertools::Itertools;
 
 use crate::{
     component::{
-        grouped_lines::GroupedLines,
+        overflow_block::OverflowBlock,
         ls_history_graph,
-        stateful_lines::{StatefulGroupedLines, StatefulLinesType},
+        stateful_lines::{StatefulOverflowBlock, StatefulLinesType},
     },
     ring::{Ring, DEFAULT_HISTORY_LEN},
     sensor::{
@@ -39,7 +39,7 @@ pub struct ResMEM {
     // Show
     theme: SharedTheme,
 
-    viewer_state: StatefulGroupedLines<'static>,
+    viewer_state: StatefulOverflowBlock<'static>,
 }
 
 impl ResMEM {
@@ -164,9 +164,9 @@ impl Resource for ResMEM {
         self.formatted_total_swap = formatted_total_swap;
     }
 
-    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
+    fn block(&self, args: &mut BlockArg) -> AResult<OverflowBlock<'static>> {
         let width = args.width;
-        let mut builder = GroupedLines::builder(width, &self.theme)
+        let mut builder = OverflowBlock::builder(width, &self.theme)
             .kv("Dev", {
                 format!(
                     "{}({})",
@@ -199,7 +199,7 @@ impl Resource for ResMEM {
         let width = args.rect.width;
         let mut block_vec = vec![];
 
-        let usage = GroupedLines::builder(width, &self.theme)
+        let usage = OverflowBlock::builder(width, &self.theme)
             .kv_sep("Memory", self.mem_usage().as_str())
             .kv_sep("Available", self.formatted_available_mem.or_nan_owned())
             .lines(ls_history_graph(
@@ -231,7 +231,7 @@ impl Resource for ResMEM {
 
         block_vec.push(usage);
 
-        let props = GroupedLines::builder(width, &self.theme)
+        let props = OverflowBlock::builder(width, &self.theme)
             .kv_sep("Slot Usage", self.info.len().to_string().as_str())
             .kv_sep("Speed", {
                 map_all_unique(self.info.iter(), |e| e.speed_mts.or_nan(|e| e.to_string()))

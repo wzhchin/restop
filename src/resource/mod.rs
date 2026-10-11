@@ -31,7 +31,7 @@ use ratatui::{
 
 use crate::{
     app::ResourceEvent,
-    component::{grouped_lines::GroupedLines, stateful_lines::StatefulLinesType},
+    component::{overflow_block::OverflowBlock, stateful_lines::StatefulLinesType},
     sensor::{
         battery::BatteryData,
         cpu::CpuData,
@@ -58,7 +58,7 @@ pub trait Resource {
 
     fn update_data(&mut self, data: &Self::Rsp);
 
-    fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>>;
+    fn block(&self, args: &mut BlockArg) -> AResult<OverflowBlock<'static>>;
 
     fn _build_page(&mut self, _args: &DetailArg) -> AResult<String> {
         Ok("Not Supported".to_string())
@@ -241,7 +241,7 @@ impl ResourceType {
         }
     }
 
-    pub fn block(&self, args: &mut BlockArg) -> AResult<GroupedLines<'static>> {
+    pub fn block(&self, args: &mut BlockArg) -> AResult<OverflowBlock<'static>> {
         match self {
             ResourceType::CPU(rt) => rt.block(args),
             ResourceType::Memory(rt) => rt.block(args),

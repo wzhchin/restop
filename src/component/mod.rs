@@ -9,11 +9,11 @@ use crate::ring::Ring;
 use chin_tools::utils::string_util::split_by_len;
 use ratatui::style::Style;
 
-pub mod grouped_lines;
+pub mod overflow_block;
 pub mod input;
 pub mod stateful_lines;
 
-pub use grouped_lines::render_border;
+pub use overflow_block::render_border;
 
 pub fn ls_kv(
     key: Option<&str>,
