@@ -5,7 +5,7 @@ use ratatui::{
     style::{Style, Stylize},
     symbols::line::*,
     text::{Line, Span},
-    widgets::Widget,
+    widgets::{Block, BorderType, Borders, Widget},
 };
 
 use crate::view::theme::{SharedTheme, Theme};
@@ -25,10 +25,6 @@ struct Border {
 }
 
 impl Border {
-    fn new(focused: bool) -> Self {
-        Self::styled(focused, Theme::default().border(focused))
-    }
-
     fn styled(focused: bool, style: Style) -> Self {
         macro_rules! fcs {
             ($when_focused:expr, $when_unfocused:expr) => {
@@ -51,36 +47,19 @@ impl Border {
             style,
         }
     }
-
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        if area.width == 0 || area.height == 0 {
-            return;
-        }
-
-        let top = area.top();
-        let right = area.right().saturating_sub(1);
-        let bottom = area.bottom().saturating_sub(1);
-        let left = area.left();
-        let style = self.style;
-
-        buf.set_string(left, top, self.top_left, style);
-        buf.set_string(right, top, self.top_right, style);
-        buf.set_string(left, bottom, self.bottom_left, style);
-        buf.set_string(right, bottom, self.bottom_right, style);
-
-        for x in left.saturating_add(1)..right {
-            buf.set_string(x, top, self.top_horizontal, style);
-            buf.set_string(x, bottom, self.horizontal, style);
-        }
-        for y in top.saturating_add(1)..bottom {
-            buf.set_string(left, y, self.vertical, style);
-            buf.set_string(right, y, self.vertical, style);
-        }
-    }
 }
 
 pub fn render_border(focused: bool, area: Rect, buf: &mut Buffer) {
-    Border::new(focused).render(area, buf);
+    let border_type = if focused {
+        BorderType::Double
+    } else {
+        BorderType::Plain
+    };
+    Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type)
+        .border_style(Theme::default().border(focused))
+        .render(area, buf);
 }
 
 #[derive(Clone, Debug)]
